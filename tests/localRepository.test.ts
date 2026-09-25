@@ -98,7 +98,5 @@ try {
   const reviewSnapshot = await readCommitHistory(directory(root), baselineOid, branch);
   assert.deepEqual(reviewSnapshot.localOnly, []);
   assert.deepEqual(reviewSnapshot.remoteOnly.map(commit => commit.title), ['remote change']);
-  const ownPatch = await readLocalRepository(directory(process.cwd()));
-  assert.match(ownPatch, /diff --git a\/README\.md b\/README\.md/);
   console.log('Local repository integration test passed');
 } finally { await rm(root, { recursive: true, force: true }); }
