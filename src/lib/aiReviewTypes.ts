@@ -12,11 +12,18 @@ export type TopicArtifact = {
   model: string;
   topics: Topic[];
 };
+export type ReviewTitleArtifact = {
+  schemaVersion: 1;
+  snapshotHash: string;
+  model: string;
+  title: string;
+};
 
 export type TopicReview = {
   artifact: TopicArtifact;
   reviewed: Record<string, 'reviewed' | 'needs-work'>;
   createdAt: number;
+  sourceData?: string;
 };
 
 export type AiRequestUsage = {

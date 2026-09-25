@@ -2,7 +2,8 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { inspectRepository, type CommitHistory, type RepositoryInfo } from '../lib/localRepository';
-import { deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveReviewSnapshot, type Project, type ReviewRecord } from '../lib/projectStore';
+import { deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveReviewSnapshot, topicsAreStale, type Project, type ReviewRecord } from '../lib/projectStore';
+import { generateReviewTitleInBackground } from '../lib/reviewTitles';
 import { parseRoute, resolveId, routeUrl, shortId, type Route } from '../lib/routes';
 import { readProjectPath, type ProjectPath } from '../lib/projectFiles';
 import { loadGlobalSettings } from '../lib/globalSettings';
@@ -204,6 +205,7 @@ async function scanProject() {
     }
     const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(), branch: result.gitInfo.currentBranch, baseRef: result.baseRef, headOid: result.gitInfo.headOid, fileCount: data.files.length, data: result.data, snapshotHash: result.snapshotHash });
     reviews.value = await listReviews(selected.id);
+    generateReviewTitleInBackground(selected, saved);
     reviewData.value = data;
     activeReviewId.value = saved.id;
     commitHistory.value = null; commitsError.value = '';
@@ -240,11 +242,11 @@ async function addProject() {
   try { const selected = await addLocalProject(projects.value); if (!projects.value.some(item => item.id === selected.id)) projects.value = [...projects.value, selected]; navigate({ kind: 'project', projectId: selected.id, page: 'files' }); }
   catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; note(error instanceof Error ? error.message : String(error), true); }
 }
-async function saveProjectSettings(name: string, baseRef: string, liveReview: boolean, liveTopics: boolean) {
+async function saveProjectSettings(name: string, baseRef: string, liveReview: boolean) {
   const selected = project.value;
   if (!selected) return;
   if (!name) return note('Project name cannot be empty.', true);
-  selected.name = name; selected.settings = { baseRef, liveReview, liveTopics };
+  selected.name = name; selected.settings = { baseRef, liveReview };
   try { await rememberProject(selected); projects.value = [...projects.value]; window.dispatchEvent(new Event('ming:settings-changed')); note('Project settings saved in this browser.'); }
   catch (error) { note(error instanceof Error ? error.message : String(error), true); }
 }
@@ -269,9 +271,10 @@ async function generateAiReview() {
   const key = copilot.copilotDeepSeekApiKey.trim();
   const model = copilot.copilotModel;
   if (!key) { note('Add a DeepSeek API key in Copilot settings first.', true); return; }
+  reviewView.value = 'topics';
   aiBusy.value = true; aiProgress.value = t('Preparing topic review…'); aiCompleted.value = 0; aiTotal.value = 0; message.value = '';
   const resumeLiveReview = await pauseLiveReview(selected.projectId);
-  const worker = new Worker(new URL('../workers/aiReviewWorker.ts', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('../workers/aiTaskWorker.ts', import.meta.url), { type: 'module' });
   const usageWrites: Promise<void>[] = [];
   let usageSaveFailed = false;
   try {
@@ -295,7 +298,7 @@ async function generateAiReview() {
       worker.postMessage({ reviewJson: selected.data, model, apiKey: key, summaryLanguage: copilot.copilotSummaryLanguage, reviewLanguage: copilot.copilotReviewLanguage, uiLanguage: language.value });
     });
     if (record.value?.id !== selected.id) return;
-    const updated = { ...selected, aiReview: { artifact, reviewed: {}, createdAt: Date.now() } };
+    const updated = { ...selected, aiReview: { artifact, reviewed: {}, createdAt: Date.now(), sourceData: selected.data } };
     if (!await saveAiReviewIfCurrent(selected.id, selected.snapshotHash, updated.aiReview, selected.data)) return;
     reviews.value = reviews.value.map(item => item.id === selected.id ? updated : item);
     reviewView.value = 'topics';
@@ -307,7 +310,7 @@ async function generateAiReview() {
 }
 async function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
   const selected = record.value;
-  if (!selected?.aiReview) return;
+  if (!selected?.aiReview || topicsAreStale(selected)) return;
   const reviewed = { ...selected.aiReview.reviewed };
   if (status) reviewed[id] = status;
   else delete reviewed[id];

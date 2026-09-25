@@ -1,30 +1,30 @@
 import { reactive } from 'vue';
 import { loadGlobalSettings } from './globalSettings';
-import { deleteReview, listProjects, listReviews, recordAiUsage, saveAiReviewIfCurrent, saveReviewSnapshot, type Project } from './projectStore';
+import { deleteReview, listProjects, listReviews, saveReviewSnapshot, type Project } from './projectStore';
 import type { RepositoryInfo } from './localRepository';
 import type { Review } from './reviewTypes';
-import type { AiRequestUsage, TopicArtifact } from './aiReviewTypes';
 import { language } from './i18n';
+import { generateReviewTitleInBackground } from './reviewTitles';
 
 type ObserverRecord = { type: string; relativePathComponents: string[] };
 type Observer = { observe(handle: FileSystemDirectoryHandle, options: { recursive: boolean }): Promise<void>; disconnect(): void };
 type ObserverConstructor = new (callback: (records: ObserverRecord[]) => void) => Observer;
 type ScanResult = { data: string | null; snapshotHash?: string; gitInfo: RepositoryInfo; baseRef: string };
-type Job = { project: Project; mode: 'observer' | 'timer'; observer?: Observer; timer?: number; debounce?: number; running: boolean; pending: boolean; paused: boolean; stopped: boolean; lastRun: number; failedAiHash?: string; worker?: Worker; cancelWorker?: () => void; active?: Promise<void> };
+type Job = { project: Project; mode: 'observer' | 'timer'; observer?: Observer; timer?: number; debounce?: number; running: boolean; pending: boolean; paused: boolean; stopped: boolean; lastRun: number; worker?: Worker; cancelWorker?: () => void; active?: Promise<void> };
 
-export const liveReviewStatuses = reactive(new Map<string, string>());
+export type LiveReviewStatus = { phase: 'watching' | 'polling' | 'scanning' | 'permission' | 'error'; detail?: string };
+export const liveReviewStatuses = reactive(new Map<string, LiveReviewStatus>());
 const jobs = new Map<string, Job>();
 let started = false;
 
-function status(job: Job, value: string) { liveReviewStatuses.set(job.project.id, value); }
+function status(job: Job, phase: LiveReviewStatus['phase'], detail?: string) { liveReviewStatuses.set(job.project.id, { phase, detail }); }
 function notify(projectId: string) { window.dispatchEvent(new CustomEvent('ming:reviews-changed', { detail: { projectId } })); }
-function waitForWorker<T>(worker: Worker, request: unknown, job: Job, onUsage?: (usage: AiRequestUsage) => void): Promise<T> {
+function waitForWorker<T>(worker: Worker, request: unknown, job: Job): Promise<T> {
   job.worker = worker;
   return new Promise<T>((resolve, reject) => {
     job.cancelWorker = () => reject(new DOMException('Background task stopped', 'AbortError'));
-    worker.onmessage = (event: MessageEvent<{ type: string; message?: string; usage?: AiRequestUsage; artifact?: TopicArtifact } & T>) => {
-      if (event.data.type === 'usage' && event.data.usage) onUsage?.(event.data.usage);
-      else if (event.data.type === 'done') resolve(event.data);
+    worker.onmessage = (event: MessageEvent<{ type: string; message?: string } & T>) => {
+      if (event.data.type === 'done') resolve(event.data);
       else if (event.data.type === 'error') reject(new Error(event.data.message ?? 'Background worker failed'));
     };
     worker.onerror = event => reject(new Error(event.message || 'Background worker stopped'));
@@ -33,7 +33,7 @@ function waitForWorker<T>(worker: Worker, request: unknown, job: Job, onUsage?: 
 }
 async function reconcile(job: Job) {
   const selected = job.project;
-  status(job, 'Checking local changes');
+  status(job, 'scanning');
   const scanned = await waitForWorker<ScanResult>(new Worker(new URL('../workers/scanWorker.ts', import.meta.url), { type: 'module' }),
     { directory: selected.directory, baseRef: selected.settings.baseRef, uiLanguage: language.value }, job);
   if (job.stopped) return;
@@ -44,25 +44,12 @@ async function reconcile(job: Job) {
     return;
   }
   const unchanged = existing && existing.snapshotHash === scanned.snapshotHash && existing.headOid === scanned.gitInfo.headOid;
-  if (unchanged && (!selected.settings.liveTopics || existing.aiReview)) return;
-  const saved = unchanged ? existing : await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(),
+  if (unchanged) return;
+  const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(),
     branch: scanned.gitInfo.currentBranch, baseRef: scanned.baseRef, headOid: scanned.gitInfo.headOid,
     fileCount: data.files.length, data: scanned.data!, snapshotHash: scanned.snapshotHash });
-  if (!unchanged) notify(selected.id);
-  const copilot = loadGlobalSettings();
-  if (!selected.settings.liveTopics || !copilot.copilotDeepSeekApiKey.trim() || saved.aiReview || job.stopped || job.failedAiHash === saved.snapshotHash) return;
-  status(job, 'Generating topics in background');
-  const usageWrites: Promise<void>[] = [];
-  let response: { artifact: TopicArtifact };
-  try { response = await waitForWorker<{ artifact: TopicArtifact }>(new Worker(new URL('../workers/aiReviewWorker.ts', import.meta.url), { type: 'module' }),
-    { reviewJson: saved.data, model: copilot.copilotModel, apiKey: copilot.copilotDeepSeekApiKey.trim(),
-      summaryLanguage: copilot.copilotSummaryLanguage, reviewLanguage: copilot.copilotReviewLanguage, uiLanguage: language.value }, job,
-    usage => { usageWrites.push(recordAiUsage({ ...usage, id: crypto.randomUUID(), projectId: selected.id, projectName: selected.name,
-      reviewId: saved.id, createdAt: Date.now(), task: 'topic-review', provider: 'deepseek' })); }); }
-  catch (error) { job.failedAiHash = saved.snapshotHash; await Promise.allSettled(usageWrites); throw error; }
-  await Promise.allSettled(usageWrites);
-  if (!job.stopped && !job.pending && await saveAiReviewIfCurrent(saved.id, saved.snapshotHash,
-    { artifact: response.artifact, reviewed: {}, createdAt: Date.now() })) notify(selected.id);
+  notify(selected.id);
+  generateReviewTitleInBackground(selected, saved);
 }
 async function run(job: Job) {
   if (job.paused) { job.pending = true; return; }
@@ -76,9 +63,9 @@ async function run(job: Job) {
         if (lock) await reconcile(job);
       });
     } else await reconcile(job);
-    if (!job.stopped) status(job, job.observer ? 'Watching for local changes' : 'Timer checks active');
+    if (!job.stopped) status(job, job.observer ? 'watching' : 'polling');
   } catch (error) {
-    if (!job.stopped && !job.paused) status(job, error instanceof Error ? error.message : String(error));
+    if (!job.stopped && !job.paused) status(job, 'error', error instanceof Error ? error.message : String(error));
   } finally {
     job.running = false;
     if (job.pending && !job.paused && !job.stopped) {
@@ -96,7 +83,7 @@ function schedule(job: Job, immediate = false) {
 }
 async function watchProject(job: Job) {
   if (await job.project.directory.queryPermission({ mode: 'read' }) !== 'granted') {
-    status(job, 'Waiting for folder permission');
+    status(job, 'permission');
     return;
   }
   const ObserverType = (globalThis as typeof globalThis & { FileSystemObserver?: ObserverConstructor }).FileSystemObserver;
@@ -111,14 +98,14 @@ async function watchProject(job: Job) {
       await observer.observe(job.project.directory, { recursive: true });
       if (job.stopped) { observer.disconnect(); return; }
       job.observer = observer;
-      status(job, 'Watching for local changes');
+      status(job, 'watching');
     } catch { startTimer(job); }
   } else startTimer(job);
   schedule(job, true);
 }
 function startTimer(job: Job) {
   if (job.stopped || job.timer) return;
-  status(job, 'Timer checks active');
+  status(job, 'polling');
   job.timer = window.setInterval(() => schedule(job), 30_000);
 }
 function stopJob(job: Job) {
@@ -133,10 +120,10 @@ export async function refreshLiveReviews() {
   if (!started) return;
   const projects = await listProjects();
   const mode = loadGlobalSettings().fileChangeDetection;
-  const enabled = new Map(projects.filter(project => project.settings.liveReview).map(project => [project.id, project]));
+  const enabled = new Map(projects.filter(project => project.settings.liveReview !== false).map(project => [project.id, project]));
   for (const [id, job] of jobs) {
     const current = enabled.get(id);
-    if (!current || current.settings.baseRef !== job.project.settings.baseRef || current.settings.liveTopics !== job.project.settings.liveTopics || job.mode !== mode) {
+    if (!current || current.settings.baseRef !== job.project.settings.baseRef || job.mode !== mode) {
       stopJob(job); jobs.delete(id);
     }
   }
@@ -144,14 +131,14 @@ export async function refreshLiveReviews() {
     if (jobs.has(project.id)) continue;
     const job: Job = { project, mode, running: false, pending: false, paused: false, stopped: false, lastRun: 0 };
     jobs.set(project.id, job);
-    void watchProject(job).catch(error => status(job, error instanceof Error ? error.message : String(error)));
+    void watchProject(job).catch(error => status(job, 'error', error instanceof Error ? error.message : String(error)));
   }
 }
 function onVisibility() {
   if (document.visibilityState === 'hidden') return;
   void refreshLiveReviews();
   for (const job of jobs.values()) {
-    if (liveReviewStatuses.get(job.project.id) === 'Waiting for folder permission') void watchProject(job);
+    if (liveReviewStatuses.get(job.project.id)?.phase === 'permission') void watchProject(job);
     else if (Date.now() - job.lastRun > 5_000) schedule(job, true);
   }
 }

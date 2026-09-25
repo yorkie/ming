@@ -16,7 +16,8 @@ try {
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
   const projectSettingsHtml = await renderToString(createSSRApp(ProjectSettingsView, { project, gitInfo: null }));
   assert.match(projectSettingsHtml, /Live review updates/);
-  assert.match(projectSettingsHtml, /Generate topics for live updates/);
+  assert.doesNotMatch(projectSettingsHtml, /Generate topics for live updates/);
+  assert.match(projectSettingsHtml, /aria-label="Live review updates" aria-checked="true"/);
   const filesHtml = await renderToString(createSSRApp(FilesView, {
     project, gitInfo: null, path: '', busy: false, error: '', settings: defaultGlobalSettings,
     data: { kind: 'directory', path: '', entries: [{ name: 'src', kind: 'directory' }, { name: 'README.md', kind: 'file' }], readme: { name: 'README.md', content: { text: '# Sample\n', reason: null, size: 9 } } },
@@ -36,6 +37,12 @@ try {
   assert.match(reviewsHtml, /const/);
   assert.match(reviewsHtml, /Changed files/);
   assert.match(reviewsHtml, /Review pairs/);
+  const titledReviewsHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [{ ...record, title: 'Add task status panel' }], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(titledReviewsHtml, /Add task status panel/);
   const topicRecord: ReviewRecord = { ...record, aiReview: { createdAt: 2, reviewed: {}, artifact: {
     schemaVersion: 1, snapshotHash: 'sample', model: 'deepseek-flash',
     topics: [{ id: 'topic-1', title: 'Update main', summary: 'Changes the main value.', checks: ['Check callers.'], unitIds: ['f0h0'] }],
@@ -45,6 +52,32 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  const latestData: Review = { ...data, files: [{ ...data.files[0]!, path: 'src/new.ts' }] };
+  const staleRecord: ReviewRecord = { ...topicRecord, data: JSON.stringify(latestData), snapshotHash: 'new-snapshot',
+    aiReview: { ...topicRecord.aiReview!, sourceData: JSON.stringify(data) } };
+  const staleHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: staleRecord, data: latestData, settings: defaultGlobalSettings }));
+  assert.match(staleHtml, /Topics are out of date/);
+  assert.match(staleHtml, /topic-stale-action/);
+  assert.match(staleHtml, /is-stale/);
+  assert.match(staleHtml, /src\/main\.ts/);
+  assert.doesNotMatch(staleHtml, /src\/new\.ts/);
+  assert.doesNotMatch(staleHtml, /Mark reviewed/);
+  const generatingHtml = await renderToString(createSSRApp(TopicReviewView, {
+    project, record: staleRecord, data: latestData, settings: defaultGlobalSettings,
+    aiBusy: true, aiProgress: 'Analyzing group 2 of 3', aiCompleted: 1, aiTotal: 3,
+  }));
+  assert.match(generatingHtml, /Analyzing group 2 of 3/);
+  assert.match(generatingHtml, /<progress/);
+  assert.match(generatingHtml, /Update main/);
+  assert.match(generatingHtml, /src\/main\.ts/);
+  const generatingReviewHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [staleRecord], record: staleRecord, data: latestData, reviewView: 'topics', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: true, aiProgress: 'Analyzing group 2 of 3', aiCompleted: 1, aiTotal: 3, aiConfigured: true,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(generatingReviewHtml, /Update main/);
+  assert.match(generatingReviewHtml, /Analyzing group 2 of 3/);
+  assert.doesNotMatch(generatingReviewHtml, /scan-progress ai-review-progress/);
   setLanguage('zh-CN');
   const chineseTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: topicRecord, data, settings: defaultGlobalSettings }));
   assert.match(chineseTopicHtml, /标记已评审/);

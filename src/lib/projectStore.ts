@@ -1,5 +1,5 @@
-import type { TopicReview } from './aiReviewTypes';
-export type ProjectSettings = { baseRef: string; liveReview?: boolean; liveTopics?: boolean };
+import type { ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
+export type ProjectSettings = { baseRef: string; liveReview?: boolean };
 export type Project = {
   id: string;
   name: string;
@@ -17,15 +17,21 @@ export type ReviewRecord = {
   data: string;
   fileCount?: number;
   snapshotHash?: string;
+  title?: string;
   aiReview?: TopicReview;
 };
+export function topicsAreStale(review: ReviewRecord): boolean {
+  if (!review.aiReview) return false;
+  if (review.snapshotHash) return review.aiReview.artifact.snapshotHash !== review.snapshotHash;
+  return !!review.aiReview.sourceData && review.aiReview.sourceData !== review.data;
+}
 export type AiUsageRecord = {
   id: string;
   projectId: string;
   projectName: string;
   reviewId: string;
   createdAt: number;
-  task: 'topic-review';
+  task: 'topic-review' | 'review-title';
   provider: 'deepseek';
   model: string;
   group: number;
@@ -95,8 +101,12 @@ export async function listReviews(projectId: string): Promise<ReviewRecord[]> {
         const key = JSON.stringify([review.branch, review.baseRef]);
         const latest = pairs.get(key);
         if (!latest) { pairs.set(key, review); continue; }
-        if (!latest.aiReview && review.aiReview && sameSnapshot(latest, review)) {
+        if ((!latest.aiReview || topicsAreStale(latest)) && review.aiReview && sameSnapshot(latest, review) && !topicsAreStale(review)) {
           latest.aiReview = review.aiReview;
+          store.put(latest);
+        }
+        if (!latest.title && review.title && sameSnapshot(latest, review)) {
+          latest.title = review.title;
           store.put(latest);
         }
         store.delete(review.id);
@@ -135,6 +145,27 @@ export async function saveAiReviewIfCurrent(id: string, snapshotHash: string | u
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
+export async function saveReviewTitleIfCurrent(id: string, snapshotHash: string | undefined, artifact: ReviewTitleArtifact, expectedData?: string): Promise<boolean> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved = false;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (current && artifact.title.trim() && (snapshotHash
+        ? current.snapshotHash === snapshotHash && artifact.snapshotHash === snapshotHash
+        : current.snapshotHash === undefined && current.data === expectedData)) {
+        store.put({ ...current, title: artifact.title.trim() });
+        saved = true;
+      }
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
 export async function deleteReview(id: string): Promise<void> {
   await requestInStore('reviews', 'readwrite', store => store.delete(id));
 }
@@ -157,8 +188,14 @@ export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRe
         .filter(item => item.branch === review.branch && item.baseRef === review.baseRef)
         .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
       const matchingTopics = matches.find(item => item.aiReview && sameSnapshot(item, review));
+      const matchingTitle = matches.find(item => item.title && sameSnapshot(item, review));
+      const previousTopics = matchingTopics ?? matches.find(item => item.aiReview);
       saved = { ...review, id: matches[0]?.id ?? review.id,
-        aiReview: matchingTopics?.aiReview };
+        title: matchingTitle?.title,
+        aiReview: previousTopics?.aiReview && {
+          ...previousTopics.aiReview,
+          sourceData: previousTopics.aiReview.sourceData ?? (!previousTopics.snapshotHash || previousTopics.snapshotHash === previousTopics.aiReview.artifact.snapshotHash ? previousTopics.data : undefined),
+        } };
       for (const duplicate of matches.slice(1)) store.delete(duplicate.id);
       store.put(saved);
     };

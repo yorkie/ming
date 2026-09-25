@@ -6,7 +6,7 @@ export async function addLocalProject(projects: Project[]): Promise<Project> {
   const { validateGitRepository } = await import('./localRepository');
   await validateGitRepository(directory);
   for (const existing of projects) if (await existing.directory.isSameEntry(directory)) return existing;
-  const project: Project = { id: crypto.randomUUID(), name: directory.name, directory, addedAt: Date.now(), settings: { baseRef: 'HEAD', liveReview: false, liveTopics: false } };
+  const project: Project = { id: crypto.randomUUID(), name: directory.name, directory, addedAt: Date.now(), settings: { baseRef: 'HEAD', liveReview: true } };
   await rememberProject(project);
   return project;
 }

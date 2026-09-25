@@ -68,7 +68,7 @@ onMounted(async () => {
       <form v-else class="global-settings-form" @submit.prevent="save">
         <section class="global-settings-section"><div class="global-settings-section-heading">
           <h3>{{ t({ appearance: 'Appearance', files: 'File browsing', reviews: 'Reviews', copilot: 'Copilot' }[section]) }}</h3>
-          <p>{{ t({ appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Configure DeepSeek for AI-assisted topic reviews.' }[section]) }}</p>
+          <p>{{ t({ appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Configure DeepSeek for review titles and topics.' }[section]) }}</p>
         </div>
           <template v-if="section === 'appearance'">
             <div class="setting-row"><label><strong>{{ t('Language') }}</strong><span>{{ t('Language used throughout Ming') }}</span></label><ChoiceSelect :model-value="draft.language" :options="languages" :label="t('Language')" @update:model-value="draft.language = $event as typeof draft.language" /></div>
@@ -89,7 +89,7 @@ onMounted(async () => {
           </template>
           <template v-else>
             <div class="setting-row"><label for="copilot-deepseek-key"><strong>{{ t('DeepSeek API key') }}</strong><span>{{ t('Saved in this browser with your Copilot settings') }}</span></label><div class="secret-input"><input id="copilot-deepseek-key" v-model="draft.copilotDeepSeekApiKey" :type="showDeepSeekKey ? 'text' : 'password'" autocomplete="off" :placeholder="t('Enter DeepSeek API key')" maxlength="500"><button type="button" :aria-label="t(showDeepSeekKey ? 'Hide DeepSeek API key' : 'Show DeepSeek API key')" :aria-pressed="showDeepSeekKey" @click="showDeepSeekKey = !showDeepSeekKey"><i :class="showDeepSeekKey ? 'bi bi-eye-slash' : 'bi bi-eye'" aria-hidden="true"></i></button></div></div>
-            <div v-if="draft.copilotDeepSeekApiKey.trim()" class="setting-row"><label><strong>{{ t('Model') }}</strong><span>{{ t('DeepSeek model for AI topic reviews') }}</span></label><ChoiceSelect :model-value="draft.copilotModel" :options="deepSeekModels" :label="t('Model')" @update:model-value="draft.copilotModel = $event as typeof draft.copilotModel" /></div>
+            <div v-if="draft.copilotDeepSeekApiKey.trim()" class="setting-row"><label><strong>{{ t('Model') }}</strong><span>{{ t('DeepSeek model for review titles and topics') }}</span></label><ChoiceSelect :model-value="draft.copilotModel" :options="deepSeekModels" :label="t('Model')" @update:model-value="draft.copilotModel = $event as typeof draft.copilotModel" /></div>
             <div class="setting-row"><label><strong>{{ t('Summary language') }}</strong><span>{{ t('Language for topic titles and summaries') }}</span></label><ChoiceSelect :model-value="draft.copilotSummaryLanguage" :options="languages" :label="t('Summary language')" @update:model-value="draft.copilotSummaryLanguage = $event as typeof draft.copilotSummaryLanguage" /></div>
             <div class="setting-row"><label><strong>{{ t('Review language') }}</strong><span>{{ t('Language for review guidance, comments and conclusions') }}</span></label><ChoiceSelect :model-value="draft.copilotReviewLanguage" :options="languages" :label="t('Review language')" @update:model-value="draft.copilotReviewLanguage = $event as typeof draft.copilotReviewLanguage" /></div>
           </template>

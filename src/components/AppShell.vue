@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue';
 import type { Project } from '../lib/projectStore';
 import type { GlobalSettingsSection } from '../lib/routes';
 import { t } from '../lib/i18n';
+import BackgroundTasks from './BackgroundTasks.vue';
 
 type Page = 'files' | 'reviews' | 'branches' | 'settings';
 const props = defineProps<{
@@ -67,7 +68,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
         </div>
         <button id="add-project-small" class="button-outline" :title="t('Add project')" @click="emit('addProject')"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button>
       </div>
-      <span class="masthead-side">MING / CODE REVIEW</span>
+      <BackgroundTasks :projects="projects" />
     </header>
     <div class="app-body">
       <aside class="rail">

@@ -71,7 +71,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .masthead { height: 62px; padding: 0 32px; border-color: #d8dee4; }
 .crumb, .crumb button, .crumb strong { color: #59636e; font-size: 12px; }
 .crumb strong { color: #1f2328; }
-.masthead-side { color: #8c959f; letter-spacing: .7px; }
 .page { padding: 32px clamp(24px, 2.5vw, 48px) 70px; }
 .page-kicker, .section-index, .card-index { color: #59636e; letter-spacing: .5px; }
 .page-kicker span { color: #8c959f; }
@@ -396,7 +395,27 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .project-picker-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-picker-option i { flex: none; }
 .top-project-picker .button-outline { padding: 7px 10px; }
-.masthead-side { margin-left: auto; }
+.background-tasks { position: relative; flex: none; margin-left: auto; }
+.background-tasks-trigger { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; color: #24292f; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.background-tasks-trigger:hover, .background-tasks-trigger[aria-expanded="true"] { background: #f6f8fa; }
+.background-tasks-trigger.has-error { color: #9a6700; }
+.background-tasks-trigger > i { flex: none; width: 16px; font-size: 15px; text-align: center; }
+.background-tasks-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(370px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - var(--topbar-height) - 16px)); overflow-y: auto; border: 1px solid #d0d7de; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px #1f232826; }
+.background-tasks-heading { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #d8dee4; font-size: 13px; }
+.background-tasks-heading span { color: #59636e; font-size: 11px; font-weight: 400; white-space: nowrap; }
+.background-tasks-empty { margin: 0; padding: 20px 16px; color: #59636e; font-size: 12px; line-height: 1.5; }
+.background-task-project { padding: 13px 16px; border-bottom: 1px solid #d8dee4; }
+.background-task-project:last-child { border-bottom: 0; }
+.background-task-project-name { display: block; overflow: hidden; color: #24292f; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.background-task-state { display: flex; align-items: flex-start; gap: 10px; margin-top: 9px; color: #59636e; }
+.background-task-state > i { flex: none; width: 18px; font-size: 15px; text-align: center; }
+.background-task-state > div { min-width: 0; }
+.background-task-state strong { color: #24292f; font-size: 12px; font-weight: 600; }
+.background-task-state p { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
+.background-task-state.is-scanning > i { color: #0969da; }
+.background-task-state.is-titling > i { color: #8250df; }
+.background-task-state.is-watching > i, .background-task-state.is-polling > i { color: #1a7f37; }
+.background-task-state.is-permission > i, .background-task-state.is-error > i { color: #9a6700; }
 .app-body .rail { position: fixed; top: var(--topbar-height); bottom: 0; left: 0; z-index: 10; display: flex; flex-direction: column; width: var(--sidebar-width); min-height: 0; padding: 24px 12px; overflow-y: auto; }
 .app-body .rail-section { margin: 0; }
 .app-body .rail-heading { padding: 0 10px 12px; }
@@ -421,17 +440,40 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .reviews-layout { --review-sidebar-width: 250px; --review-tabs-height: 60px; --directory-width: 350px; --directory-gap: 16px; --directory-offset: 20px; --directory-reserve: calc(var(--directory-width) + var(--directory-gap) + var(--directory-offset)); }
 .reviews-layout.review-view-commits { --directory-reserve: 0px; }
 .topic-empty { max-width: 620px; padding: 38px 16px; }
+.topic-empty.is-generating { max-width: none; padding: 16px 0; }
+.topic-empty .topic-generation-progress { padding: 12px 14px; border: 1px solid #54aeff; border-radius: 6px; background: #ddf4ff; color: #0550ae; }
 .topic-empty h3 { margin: 0 0 12px; font-size: 22px; }
 .topic-empty p { color: #59636e; font-size: 13px; line-height: 1.6; }
 .topic-empty button { margin-top: 12px; }
 .topic-empty button:disabled { opacity: .55; cursor: not-allowed; }
 .topic-review { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 22px; padding-top: 16px; }
+.topic-stale-notice { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid #d4a72c; border-radius: 6px; background: #fff8c5; color: #633c01; font-size: 12px; }
+.topic-stale-notice i { flex: none; font-size: 15px; }
+.topic-stale-notice p { margin: 4px 0 0; line-height: 1.5; }
+.topic-stale-action { width: 100%; text-align: left; }
+.topic-stale-action:hover { background: #fff3ae; border-color: #b08818; }
+.topic-stale-action > span:nth-child(2) { flex: 1; min-width: 0; }
+.topic-stale-action > span:nth-child(2) > span { display: block; margin-top: 4px; line-height: 1.5; }
+.topic-stale-link { align-self: center; white-space: nowrap; font-weight: 600; }
+.topic-stale-link i { margin-left: 4px; }
+.topic-generation-progress { display: block; }
+.topic-stale-notice.topic-generation-progress { border-color: #54aeff; background: #ddf4ff; color: #0550ae; }
+.topic-generation-heading { display: flex; align-items: center; gap: 9px; }
+.topic-generation-heading .button-outline { margin-left: auto; }
+.topic-generation-progress > p, .topic-empty .topic-generation-progress > p { margin: 8px 0; color: #0550ae; }
+.topic-generation-progress progress { display: block; width: 100%; height: 6px; accent-color: #0969da; }
+.topic-old-diff-unavailable { margin: 24px 0; color: #59636e; font-size: 12px; }
 .topic-list { position: sticky; top: calc(var(--topbar-height) + var(--review-tabs-height) + 12px); align-self: start; max-height: calc(100vh - var(--topbar-height) - var(--review-tabs-height) - 28px); overflow: auto; border: 1px solid #d8dee4; border-radius: 6px; background: #fff; }
 .topic-list-heading { display: flex; justify-content: space-between; gap: 8px; padding: 14px; border-bottom: 1px solid #d8dee4; font-size: 12px; }
 .topic-list-heading span { color: #59636e; }
 .topic-list-item { display: flex; gap: 10px; width: 100%; padding: 13px; border: 0; border-bottom: 1px solid #d8dee4; background: #fff; text-align: left; color: #1f2328; }
 .topic-list-item:last-child { border-bottom: 0; }
 .topic-list-item.active { background: #e6f5ff; box-shadow: inset 3px 0 #0969da; }
+.topic-review.is-stale .topic-list { border-color: #d8dee4; background: #f6f8fa; }
+.topic-review.is-stale .topic-list-heading, .topic-review.is-stale .topic-list-item { background: #f6f8fa; color: #6e7781; }
+.topic-review.is-stale .topic-list-item.active { background: #eaeef2; box-shadow: inset 3px 0 #8c959f; }
+.topic-review.is-stale .topic-list-item:hover { background: #eaeef2; }
+.topic-review.is-stale .topic-list-item small, .topic-review.is-stale .topic-number { color: #8c959f; }
 .topic-list-item > span:last-child { min-width: 0; }
 .topic-list-item strong, .topic-list-item small { display: block; overflow-wrap: anywhere; }
 .topic-list-item strong { font-size: 13px; }
@@ -528,6 +570,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 @media (max-width: 900px) {
   .app-shell { --sidebar-width: 185px; }
   .masthead .wordmark, .app-body .rail { width: var(--sidebar-width); }
+  .background-tasks-trigger { width: 36px; justify-content: center; padding: 0; }
+  .background-tasks-trigger > span { display: none; }
   .reviews-layout { --review-sidebar-width: 190px; --directory-width: 220px; }
 }
 @media (max-width: 760px) {
@@ -548,7 +592,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .masthead .wordmark { width: auto; height: 42px; padding: 0; border: 0; }
   .top-project-picker { order: 2; width: 100%; padding: 0 0 8px; }
   .project-picker { flex: 1; width: auto; }
-  .masthead-side { display: none; }
+  .background-tasks { margin-left: auto; }
+  .background-tasks-trigger { width: 36px; justify-content: center; padding: 0; }
+  .background-tasks-trigger > span { display: none; }
   .app-body { display: block; padding-top: calc(var(--topbar-height) + 49px); }
   .app-body .rail { top: var(--topbar-height); bottom: auto; flex-direction: row; align-items: center; width: 100%; height: 49px; padding: 8px 16px; overflow: hidden; border-right: 0; border-bottom: 1px solid #d8dee4; }
   .app-body .rail-section { flex: 1; min-width: 0; }

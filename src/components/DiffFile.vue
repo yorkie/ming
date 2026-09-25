@@ -7,7 +7,7 @@ import type { GlobalSettings } from '../lib/globalSettings';
 import type { MarkdownSnapshot } from '../lib/localRepository';
 import type { FileChange, Hunk, Review } from '../lib/reviewTypes';
 import { t } from '../lib/i18n';
-const props = defineProps<{ file: FileChange; index: number; project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; selected: boolean; hunkIndices?: number[] }>();
+const props = defineProps<{ file: FileChange; index: number; project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; selected: boolean; hunkIndices?: number[]; readOnly?: boolean }>();
 const expanded = ref(props.settings.expandDiffs);
 const snapshot = shallowRef<MarkdownSnapshot | null>(props.file.markdown ?? null);
 const rich = ref(!props.hunkIndices && props.settings.richMarkdownByDefault && !!snapshot.value && /\.md$/i.test(props.file.path));
@@ -26,6 +26,7 @@ function escapeHtml(value: string) { return value.replace(/[&<>"']/g, c => ({ '&
 async function chooseRich() {
   error.value = '';
   if (snapshot.value) { rich.value = true; expanded.value = true; return; }
+  if (props.readOnly) return;
   if (loading.value) return;
   loading.value = true;
   const worker = new Worker(new URL('../workers/markdownWorker.ts', import.meta.url), { type: 'module' });
@@ -47,7 +48,7 @@ async function chooseRich() {
 }
 </script>
 <template>
-  <article class="file" :class="{ selected }" :data-file-section="index"><div class="file-header"><button type="button" class="file-toggle" :aria-expanded="expanded" @click="expanded = !expanded"><span class="file-mark"><i :class="expanded ? 'bi bi-chevron-down' : 'bi bi-chevron-right'" aria-hidden="true"></i></span><strong>{{ file.path }}</strong><small>{{ statusLabel }}</small></button><div class="file-header-actions"><span class="file-counts"><b class="add">+{{ shownCounts.additions }}</b><b class="remove">−{{ shownCounts.deletions }}</b></span><div v-if="isMarkdown" class="markdown-mode" role="group" aria-label="Markdown view mode"><button type="button" :class="{ active: !rich }" :aria-pressed="!rich" title="View Markdown source" @click="rich = false"><i class="bi bi-code-slash" aria-hidden="true"></i></button><button type="button" :class="{ active: rich }" :aria-pressed="rich" title="View Rich diff" :disabled="loading" @click="chooseRich"><i :class="loading ? 'bi bi-arrow-clockwise icon-spin' : 'bi bi-file-earmark-richtext'" aria-hidden="true"></i></button></div></div></div>
+  <article class="file" :class="{ selected }" :data-file-section="index"><div class="file-header"><button type="button" class="file-toggle" :aria-expanded="expanded" @click="expanded = !expanded"><span class="file-mark"><i :class="expanded ? 'bi bi-chevron-down' : 'bi bi-chevron-right'" aria-hidden="true"></i></span><strong>{{ file.path }}</strong><small>{{ statusLabel }}</small></button><div class="file-header-actions"><span class="file-counts"><b class="add">+{{ shownCounts.additions }}</b><b class="remove">−{{ shownCounts.deletions }}</b></span><div v-if="isMarkdown" class="markdown-mode" role="group" aria-label="Markdown view mode"><button type="button" :class="{ active: !rich }" :aria-pressed="!rich" title="View Markdown source" @click="rich = false"><i class="bi bi-code-slash" aria-hidden="true"></i></button><button type="button" :class="{ active: rich }" :aria-pressed="rich" title="View Rich diff" :disabled="loading || (readOnly && !snapshot)" @click="chooseRich"><i :class="loading ? 'bi bi-arrow-clockwise icon-spin' : 'bi bi-file-earmark-richtext'" aria-hidden="true"></i></button></div></div></div>
     <div v-if="error" class="markdown-error" role="status">{{ error }}</div>
     <template v-if="expanded"><div v-if="rich && snapshot" v-html="richHtml"></div><template v-else-if="highlightedHunks.length"><div v-for="(hunk, hunkIndex) in highlightedHunks" :key="hunkIndex" class="hunk"><div class="hunk-header">{{ hunk.header }}</div><div class="code"><div v-for="(line, lineIndex) in hunk.lines" :key="lineIndex" class="code-line" :class="line.kind"><span class="line-number">{{ line.oldNumber ?? '' }}</span><span class="line-number">{{ line.newNumber ?? '' }}</span><span class="code-text"><span class="line-marker">{{ line.kind === 'add' ? '+' : line.kind === 'delete' ? '−' : ' ' }}</span><span class="code-source" v-html="hunk.highlighted[lineIndex]"></span></span></div></div></div></template><div v-else class="file-empty">{{ emptyMessage }}</div></template>
   </article>
