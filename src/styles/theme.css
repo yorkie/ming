@@ -494,11 +494,13 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .project-file-commit > span { min-width: 0; margin-left: 0; overflow: hidden; text-overflow: ellipsis; }
 .project-file-commit code { flex: none; color: #59636e; font-size: 12px; }
 .project-file-list-heading > .project-file-item-count { flex: none; margin-left: auto; }
-.project-file-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 12px; align-items: center; column-gap: 12px; width: 100%; min-height: 42px; padding: 8px 16px; border: 0; border-bottom: 1px solid #d8dee4; background: #fff; color: #1f2328; font-size: 14px; line-height: 20px; text-align: left; }
+.project-file-row { display: grid; grid-template-columns: 20px minmax(130px, 1.1fr) minmax(120px, 1.3fr) 120px; align-items: center; column-gap: 12px; width: 100%; min-height: 42px; padding: 8px 16px; border: 0; border-bottom: 1px solid #d8dee4; background: #fff; color: #1f2328; font-size: 14px; line-height: 20px; text-align: left; }
 .project-file-row:last-child { border-bottom: 0; }
 .project-file-row:hover { background: #f6f8fa; color: #0969da; }
-.project-file-row > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-file-row > i:last-child { grid-column: 3; justify-self: end; color: #8c959f; font-size: 11px; }
+.project-file-row > span:nth-child(2), .project-file-row-commit { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-file-row-commit, .project-file-row-time { color: #59636e; font-size: 13px; }
+.project-file-row-time { justify-self: end; white-space: nowrap; }
+@media (max-width: 760px) { .project-file-row { grid-template-columns: 20px minmax(0, 1fr) auto; } .project-file-row-commit { display: none; } .project-file-row-time { grid-column: 3; } }
 .project-file-icon { display: grid; place-items: center; width: 20px; height: 20px; color: #59636e; font-size: 16px; }
 .project-file-icon > .bi { display: grid; place-items: center; width: 20px; height: 20px; line-height: 20px; }
 .project-file-icon > .bi::before { display: block; line-height: 20px; vertical-align: initial; }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { Project } from '../lib/projectStore';
-import type { RepositoryInfo } from '../lib/localRepository';
+import { readEntryCommits, type CommitSummary, type RepositoryInfo } from '../lib/localRepository';
 import { resolveProjectAssetPath, type ProjectPath } from '../lib/projectFiles';
 import type { GlobalSettings } from '../lib/globalSettings';
 import { renderMarkdownDocument } from '../lib/markdownDocument';
@@ -12,6 +12,22 @@ const emit = defineEmits<{ navigate: [path: string]; refresh: [] }>();
 const root = ref<HTMLElement | null>(null);
 const parts = computed(() => props.path ? props.path.split('/') : []);
 const directory = computed(() => props.data?.kind === 'directory' ? props.data : null);
+const entryCommits = shallowRef<Record<string, CommitSummary | null>>({});
+const commitsBusy = ref(false);
+const now = ref(Date.now());
+const clock = setInterval(() => { now.value = Date.now(); }, 60_000);
+let commitRequest = 0;
+watch(() => [props.project.id, props.path, props.data, props.gitInfo?.headOid], async () => {
+  const request = ++commitRequest;
+  entryCommits.value = {};
+  if (!directory.value?.entries.length || !props.gitInfo?.headOid) return;
+  commitsBusy.value = true;
+  try {
+    const commits = await readEntryCommits(props.project.directory, directory.value.path, directory.value.entries.map(entry => entry.name), props.gitInfo.headOid);
+    if (request === commitRequest) entryCommits.value = commits;
+  } catch { /* File browsing still works if Git history cannot be read. */ }
+  finally { if (request === commitRequest) commitsBusy.value = false; }
+}, { immediate: true });
 const file = computed(() => props.data?.kind === 'file' ? props.data : null);
 const fileText = computed(() => file.value?.content.text ?? null);
 const markdownFile = computed(() => !!file.value && /\.(md|markdown)$/i.test(file.value.name));
@@ -53,6 +69,19 @@ async function hydrateImages() {
 }
 watch(() => [props.project.id, props.path, props.data, props.settings.showReadmePreview], () => { clearImages(); void hydrateImages(); }, { immediate: true });
 onUnmounted(clearImages);
+onUnmounted(() => { commitRequest++; clearInterval(clock); });
+function commitTime(timestamp: number) {
+  const date = new Date(timestamp * 1000);
+  const seconds = Math.floor((now.value - date.getTime()) / 1000);
+  if (seconds < 0) return date.toLocaleDateString();
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) { const minutes = Math.floor(seconds / 60); return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`; }
+  if (seconds < 86_400) { const hours = Math.floor(seconds / 3600); return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`; }
+  const days = Math.floor(seconds / 86_400);
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days} days ago`;
+  return date.toLocaleDateString();
+}
 </script>
 
 <template>
@@ -63,7 +92,7 @@ onUnmounted(clearImages);
     <div v-else-if="error" class="files-state error" role="status">{{ error }}</div>
     <template v-else-if="directory">
       <section class="project-file-list"><div class="project-file-heading project-file-list-heading"><template v-if="directory.path"><i class="bi bi-folder2-open" aria-hidden="true"></i><strong>{{ parts.at(-1) }}</strong></template><div class="project-file-repository-meta"><span class="project-file-branch" title="Current branch"><i class="bi bi-git" aria-hidden="true"></i> {{ gitInfo?.currentBranch ?? 'Detached HEAD' }}</span><span class="project-file-commit" :title="gitInfo?.latestCommit ? `${gitInfo.latestCommit.title} · ${gitInfo.latestCommit.author}` : 'No commits yet'"><i class="bi bi-clock-history" aria-hidden="true"></i><span>{{ gitInfo?.latestCommit?.title ?? 'No commits yet' }}</span><code v-if="gitInfo?.latestCommit">{{ gitInfo.latestCommit.oid.slice(0, 7) }}</code></span></div><span class="project-file-item-count">{{ directory.entries.length }} {{ directory.entries.length === 1 ? 'item' : 'items' }}</span></div>
-        <button v-for="entry in directory.entries" :key="entry.name" type="button" class="project-file-row" @click="emit('navigate', childPath(entry.name))"><span class="project-file-icon" :class="`project-file-icon--${entry.kind}`"><i :class="entry.kind === 'directory' ? 'bi bi-folder-fill' : 'bi bi-file-earmark-text'" aria-hidden="true"></i></span><span>{{ entry.name }}</span><i v-if="entry.kind === 'directory'" class="bi bi-chevron-right" aria-hidden="true"></i></button>
+        <button v-for="entry in directory.entries" :key="entry.name" type="button" class="project-file-row" @click="emit('navigate', childPath(entry.name))"><span class="project-file-icon" :class="`project-file-icon--${entry.kind}`"><i :class="entry.kind === 'directory' ? 'bi bi-folder-fill' : 'bi bi-file-earmark-text'" aria-hidden="true"></i></span><span class="project-file-name">{{ entry.name }}</span><span class="project-file-row-commit" :title="entryCommits[entry.name] ? `${entryCommits[entry.name]!.title} · ${entryCommits[entry.name]!.author} · ${entryCommits[entry.name]!.oid.slice(0, 7)}` : ''">{{ entryCommits[entry.name]?.title ?? (commitsBusy ? 'Loading history…' : 'Untracked or history unavailable') }}</span><time v-if="entryCommits[entry.name]" class="project-file-row-time" :datetime="new Date(entryCommits[entry.name]!.timestamp * 1000).toISOString()" :title="new Date(entryCommits[entry.name]!.timestamp * 1000).toLocaleString()">{{ commitTime(entryCommits[entry.name]!.timestamp) }}</time><span v-else class="project-file-row-time"></span></button>
         <div v-if="!directory.entries.length" class="files-state">This folder is empty.</div>
       </section>
       <section v-if="settings.showReadmePreview && directory.readme" class="project-readme"><div class="project-file-heading"><i class="bi bi-book" aria-hidden="true"></i><strong>{{ directory.readme.name }}</strong></div><div v-if="directory.readme.content.text === null" class="files-state">{{ directory.readme.content.reason === 'large' ? `README preview is limited to ${settings.filePreviewLimitKb} KB.` : 'README is not UTF-8 text.' }}</div><div v-else v-html="readmeHtml"></div></section>

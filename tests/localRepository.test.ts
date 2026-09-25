@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { inspectRepository, readCommitHistory, readLocalRepository, readMarkdownSnapshot, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
+import { inspectRepository, readCommitHistory, readEntryCommits, readLocalRepository, readMarkdownSnapshot, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
 
 function directory(path: string): FileSystemDirectoryHandle {
   return {
@@ -98,6 +98,10 @@ try {
   run('commit', '-m', 'local change');
   const branch = info.currentBranch!;
   const localOid = run('rev-parse', 'HEAD').toString().trim();
+  const entryCommits = await readEntryCommits(directory(root), '', ['tracked.txt', 'unborn.md', 'new.txt'], localOid);
+  assert.equal(entryCommits['tracked.txt']?.title, 'local change');
+  assert.equal(entryCommits['unborn.md']?.title, 'baseline');
+  assert.equal(entryCommits['new.txt'], null);
   run('checkout', '-b', 'remote-side', baselineOid);
   await writeFile(join(root, 'tracked.txt'), 'remote\n');
   run('add', 'tracked.txt');
