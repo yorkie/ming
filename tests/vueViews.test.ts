@@ -12,7 +12,11 @@ try {
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
   const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
+  const { default: ProjectSettingsView } = await server.ssrLoadModule('/src/components/ProjectSettingsView.vue');
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
+  const projectSettingsHtml = await renderToString(createSSRApp(ProjectSettingsView, { project, gitInfo: null }));
+  assert.match(projectSettingsHtml, /Live review updates/);
+  assert.match(projectSettingsHtml, /Generate topics for live updates/);
   const filesHtml = await renderToString(createSSRApp(FilesView, {
     project, gitInfo: null, path: '', busy: false, error: '', settings: defaultGlobalSettings,
     data: { kind: 'directory', path: '', entries: [{ name: 'src', kind: 'directory' }, { name: 'README.md', kind: 'file' }], readme: { name: 'README.md', content: { text: '# Sample\n', reason: null, size: 9 } } },

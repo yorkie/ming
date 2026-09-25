@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { inspectRepository, type CommitHistory, type RepositoryInfo } from '../lib/localRepository';
-import { deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveReviewSnapshot, type Project, type ReviewRecord } from '../lib/projectStore';
+import { deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveReviewSnapshot, type Project, type ReviewRecord } from '../lib/projectStore';
 import { parseRoute, resolveId, routeUrl, shortId, type Route } from '../lib/routes';
 import { readProjectPath, type ProjectPath } from '../lib/projectFiles';
 import { loadGlobalSettings } from '../lib/globalSettings';
@@ -12,6 +12,7 @@ import type { Review } from '../lib/reviewTypes';
 import type { AiRequestUsage, TopicArtifact } from '../lib/aiReviewTypes';
 import { language, t } from '../lib/i18n';
 import { localizeAiProgress } from '../lib/aiProgress';
+import { pauseLiveReview } from '../lib/liveReviews';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
 type ReviewView = 'topics' | 'changes' | 'commits';
@@ -55,7 +56,6 @@ let requestAccessOnNextRoute = false;
 let cancelCommitLoad: (() => void) | null = null;
 let cancelActiveScan: (() => void) | null = null;
 let cancelAiReview: (() => void) | null = null;
-let pendingAutoReviewId: string | null = null;
 
 function note(value: string, error = false) { message.value = t(value); messageError.value = error; }
 function compactRoute(route: Route): Route {
@@ -83,7 +83,6 @@ async function applyRoute(requestAccess = false) {
   cancelCommitLoad?.();
   commitsBusy.value = false;
   const route = parseRoute(currentRoute.fullPath);
-  if (pendingAutoReviewId && (route?.kind !== 'review' || !pendingAutoReviewId.startsWith(route.reviewId))) pendingAutoReviewId = null;
   if (route?.kind === 'home' || route?.kind === 'global-settings') { void router.replace(routeUrl(route)); return; }
   if (!route) { note('Unrecognized page URL.', true); ready.value = true; return; }
   const id = resolveId(route.projectId, projects.value.map(item => item.id));
@@ -137,10 +136,6 @@ async function applyRoute(requestAccess = false) {
     const loadFiles = view.value === 'files' && (fileView.value?.projectId !== selected.id || fileView.value.path !== filePath.value);
     if (loadFiles) { filesBusy.value = true; filesError.value = ''; }
     ready.value = true;
-    if (nextReviewId && pendingAutoReviewId === nextReviewId) {
-      pendingAutoReviewId = null;
-      void generateAiReview();
-    }
     if (route.kind === 'review' && route.page === 'commits' && !commitHistory.value) loadCommits();
     if (loadFiles) {
       try {
@@ -192,6 +187,7 @@ function scanInWorker(directory: FileSystemDirectoryHandle, baseRef: string): Pr
 async function scanProject() {
   const selected = project.value;
   if (!selected || scanBusy.value || aiBusy.value) return;
+  const resumeLiveReview = await pauseLiveReview(selected.id);
   cancelCommitLoad?.(); commitsBusy.value = false;
   scanBusy.value = true; scanProgress.value = t('Preparing scan…'); message.value = ''; messageError.value = false;
   try {
@@ -211,15 +207,11 @@ async function scanProject() {
     reviewData.value = data;
     activeReviewId.value = saved.id;
     commitHistory.value = null; commitsError.value = '';
-    const latestSettings = loadGlobalSettings();
-    const generateTopics = latestSettings.autoGenerateTopics && !!latestSettings.copilotDeepSeekApiKey.trim();
-    pendingAutoReviewId = generateTopics ? saved.id : null;
-    scanBusy.value = false;
-    navigate({ kind: 'review', projectId: selected.id, reviewId: saved.id, page: generateTopics ? 'topics' : latestSettings.defaultReviewTab });
+    navigate({ kind: 'review', projectId: selected.id, reviewId: saved.id, page: settings.defaultReviewTab });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') note('Scan canceled.');
     else note(`Scan failed: ${error instanceof Error ? error.message : String(error)}`, true);
-  } finally { scanBusy.value = false; }
+  } finally { scanBusy.value = false; resumeLiveReview(); }
 }
 async function clearComparedReview(projectId: string, branch: string | null, baseRef: string) {
   const matching = reviews.value.find(item => item.branch === branch && item.baseRef === baseRef);
@@ -248,18 +240,18 @@ async function addProject() {
   try { const selected = await addLocalProject(projects.value); if (!projects.value.some(item => item.id === selected.id)) projects.value = [...projects.value, selected]; navigate({ kind: 'project', projectId: selected.id, page: 'files' }); }
   catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; note(error instanceof Error ? error.message : String(error), true); }
 }
-async function saveProjectSettings(name: string, baseRef: string) {
+async function saveProjectSettings(name: string, baseRef: string, liveReview: boolean, liveTopics: boolean) {
   const selected = project.value;
   if (!selected) return;
   if (!name) return note('Project name cannot be empty.', true);
-  selected.name = name; selected.settings.baseRef = baseRef;
-  try { await rememberProject(selected); projects.value = [...projects.value]; note('Project settings saved in this browser.'); }
+  selected.name = name; selected.settings = { baseRef, liveReview, liveTopics };
+  try { await rememberProject(selected); projects.value = [...projects.value]; window.dispatchEvent(new Event('ming:settings-changed')); note('Project settings saved in this browser.'); }
   catch (error) { note(error instanceof Error ? error.message : String(error), true); }
 }
 async function removeProject() {
   const selected = project.value;
   if (!selected) return;
-  try { await deleteProject(selected.id); void router.push(routeUrl({ kind: 'home' })); }
+  try { await deleteProject(selected.id); window.dispatchEvent(new Event('ming:settings-changed')); void router.push(routeUrl({ kind: 'home' })); }
   catch (error) { note(error instanceof Error ? error.message : String(error), true); }
 }
 function selectProject(id: string | null) { navigate(id ? { kind: 'project', projectId: id, page: 'files' } : { kind: 'home' }); }
@@ -278,6 +270,7 @@ async function generateAiReview() {
   const model = copilot.copilotModel;
   if (!key) { note('Add a DeepSeek API key in Copilot settings first.', true); return; }
   aiBusy.value = true; aiProgress.value = t('Preparing topic review…'); aiCompleted.value = 0; aiTotal.value = 0; message.value = '';
+  const resumeLiveReview = await pauseLiveReview(selected.projectId);
   const worker = new Worker(new URL('../workers/aiReviewWorker.ts', import.meta.url), { type: 'module' });
   const usageWrites: Promise<void>[] = [];
   let usageSaveFailed = false;
@@ -303,14 +296,14 @@ async function generateAiReview() {
     });
     if (record.value?.id !== selected.id) return;
     const updated = { ...selected, aiReview: { artifact, reviewed: {}, createdAt: Date.now() } };
-    await rememberReview(updated);
+    if (!await saveAiReviewIfCurrent(selected.id, selected.snapshotHash, updated.aiReview, selected.data)) return;
     reviews.value = reviews.value.map(item => item.id === selected.id ? updated : item);
     reviewView.value = 'topics';
     note(usageSaveFailed ? 'AI topics are ready, but usage details could not be saved.' : 'AI topics are ready. Review each topic against the diff.', usageSaveFailed);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') note('AI review canceled.');
     else note(`AI review failed: ${error instanceof Error ? error.message : String(error)}${usageSaveFailed ? ' Usage details could not be saved.' : ''}`, true);
-  } finally { worker.terminate(); cancelAiReview = null; aiBusy.value = false; }
+  } finally { worker.terminate(); cancelAiReview = null; aiBusy.value = false; resumeLiveReview(); }
 }
 async function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
   const selected = record.value;
@@ -320,7 +313,7 @@ async function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
   else delete reviewed[id];
   const updated = { ...selected, aiReview: { ...selected.aiReview, reviewed } };
   try {
-    await rememberReview(updated);
+    if (!await saveAiReviewIfCurrent(selected.id, selected.snapshotHash, updated.aiReview, selected.data)) return;
     reviews.value = reviews.value.map(item => item.id === selected.id ? updated : item);
   }
   catch (error) { note(`Could not save topic status: ${error instanceof Error ? error.message : String(error)}`, true); }
@@ -330,11 +323,27 @@ watch(() => currentRoute.fullPath, () => {
   requestAccessOnNextRoute = false;
   void applyRoute(requestAccess);
 });
+async function onLiveReviewsChanged(event: Event) {
+  const projectId = (event as CustomEvent<{ projectId: string }>).detail.projectId;
+  if (activeId.value !== projectId) return;
+  const fresh = await listReviews(projectId);
+  if (activeId.value !== projectId) return;
+  const previous = record.value;
+  reviews.value = fresh;
+  const current = fresh.find(item => item.id === activeReviewId.value);
+  reviewData.value = current ? JSON.parse(current.data) as Review : null;
+  if (current && previous?.snapshotHash !== current.snapshotHash) {
+    cancelCommitLoad?.(); commitHistory.value = null; commitsError.value = '';
+    if (reviewView.value === 'commits') loadCommits();
+  }
+  if (activeReviewId.value && !current) navigate({ kind: 'project', projectId, page: 'reviews' });
+}
 onMounted(async () => {
+  window.addEventListener('ming:reviews-changed', onLiveReviewsChanged);
   try { projects.value = await listProjects(); await applyRoute(); }
   catch (error) { note(`Initialization failed: ${error}`, true); ready.value = true; }
 });
-onUnmounted(() => { cancelCommitLoad?.(); cancelActiveScan?.(); cancelAiReview?.(); });
+onUnmounted(() => { window.removeEventListener('ming:reviews-changed', onLiveReviewsChanged); cancelCommitLoad?.(); cancelActiveScan?.(); cancelAiReview?.(); });
 </script>
 
 <template>

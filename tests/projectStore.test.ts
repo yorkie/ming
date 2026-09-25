@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { strict as assert } from 'node:assert';
-import { deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveReviewSnapshot, type Project } from '../src/lib/projectStore';
+import { deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveAiReviewIfCurrent, saveReviewSnapshot, type Project } from '../src/lib/projectStore';
 
 await new Promise<void>((resolve, reject) => {
   const request = indexedDB.open('ming-projects', 1);
@@ -44,6 +44,11 @@ assert.equal(withPreview.aiReview?.reviewed['topic-1'], 'reviewed');
 const changedAgain = await saveReviewSnapshot({ id: 'review-5', projectId: project.id, createdAt: 6, branch: 'main', baseRef: 'HEAD', data: '{"files":[{"path":"new.ts"}]}', snapshotHash: 'new-diff' });
 assert.equal(changedAgain.id, 'review-1');
 assert.equal(changedAgain.aiReview, undefined);
+assert.equal(await saveAiReviewIfCurrent(changedAgain.id, 'same-diff', rescanned.aiReview!), false);
+assert.equal((await listReviews(project.id))[0].aiReview, undefined);
+assert.equal(await saveAiReviewIfCurrent(changedAgain.id, 'new-diff', { ...rescanned.aiReview!, artifact: { ...rescanned.aiReview!.artifact, snapshotHash: 'new-diff' } }), true);
+assert.equal((await listReviews(project.id))[0].aiReview?.artifact.snapshotHash, 'new-diff');
+await rememberReview(changedAgain);
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);
 await rememberReview({ id: 'legacy-duplicate', projectId: project.id, createdAt: 2, branch: 'main', baseRef: 'HEAD', data: '{"files":[]}' });
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);

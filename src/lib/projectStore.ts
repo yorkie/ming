@@ -1,5 +1,5 @@
 import type { TopicReview } from './aiReviewTypes';
-export type ProjectSettings = { baseRef: string };
+export type ProjectSettings = { baseRef: string; liveReview?: boolean; liveTopics?: boolean };
 export type Project = {
   id: string;
   name: string;
@@ -113,6 +113,27 @@ function sameSnapshot(a: ReviewRecord, b: ReviewRecord): boolean {
 }
 export async function rememberReview(review: ReviewRecord): Promise<void> {
   await requestInStore('reviews', 'readwrite', store => store.put(review));
+}
+export async function saveAiReviewIfCurrent(id: string, snapshotHash: string | undefined, aiReview: TopicReview, expectedData?: string): Promise<boolean> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved = false;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (current && (snapshotHash
+        ? current.snapshotHash === snapshotHash && aiReview.artifact.snapshotHash === snapshotHash
+        : current.snapshotHash === undefined && current.data === expectedData)) {
+        store.put({ ...current, snapshotHash: snapshotHash ?? aiReview.artifact.snapshotHash, aiReview });
+        saved = true;
+      }
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
 }
 export async function deleteReview(id: string): Promise<void> {
   await requestInStore('reviews', 'readwrite', store => store.delete(id));

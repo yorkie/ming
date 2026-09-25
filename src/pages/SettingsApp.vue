@@ -43,6 +43,7 @@ watch(() => currentRoute.fullPath, value => {
 function save() {
   try {
     saveGlobalSettings(draft.value);
+    window.dispatchEvent(new Event('ming:settings-changed'));
     draft.value = loadGlobalSettings();
     setLanguage(draft.value.language);
     note(t('Settings saved in this browser.'));
@@ -81,8 +82,8 @@ onMounted(async () => {
             <div class="setting-row"><label><strong>{{ t('Text preview limit') }}</strong><span>{{ t('Files above this size are not loaded into the preview') }}</span></label><ChoiceSelect :model-value="String(draft.filePreviewLimitKb)" :options="previewLimits" :label="t('Text preview limit')" @update:model-value="draft.filePreviewLimitKb = Number($event)" /></div>
           </template>
           <template v-else-if="section === 'reviews'">
-            <div class="setting-row"><label><strong>{{ t('Generate topics after scanning') }}</strong><span>{{ t('Generate fresh AI topics after every scan with changes. Requires a DeepSeek API key.') }}</span></label><ToggleSwitch v-model="draft.autoGenerateTopics" :label="t('Generate topics after scanning')" /></div>
-            <div class="setting-row"><label><strong>{{ t('Default tab') }}</strong><span>{{ t(draft.autoGenerateTopics ? 'Tab shown when automatic topic generation is off or unavailable' : 'Tab shown after scanning changes') }}</span></label><ChoiceSelect :model-value="draft.defaultReviewTab" :options="reviewTabs.map(item => ({ ...item, label: t(item.label) }))" :label="t('Default tab')" @update:model-value="draft.defaultReviewTab = $event as typeof draft.defaultReviewTab" /></div>
+            <div class="setting-row"><label><strong>{{ t('Local change detection') }}</strong><span>{{ t('Use file notifications when available, or check on a timer') }}</span></label><ChoiceSelect :model-value="draft.fileChangeDetection" :options="[{ value: 'observer', label: t('Observer with timer fallback') }, { value: 'timer', label: t('Timer only') }]" :label="t('Local change detection')" @update:model-value="draft.fileChangeDetection = $event as typeof draft.fileChangeDetection" /></div>
+            <div class="setting-row"><label><strong>{{ t('Default tab') }}</strong><span>{{ t('Tab shown after scanning changes') }}</span></label><ChoiceSelect :model-value="draft.defaultReviewTab" :options="reviewTabs.map(item => ({ ...item, label: t(item.label) }))" :label="t('Default tab')" @update:model-value="draft.defaultReviewTab = $event as typeof draft.defaultReviewTab" /></div>
             <div class="setting-row"><label><strong>{{ t('Expand file diffs') }}</strong><span>{{ t('Open changed files when a review is selected') }}</span></label><ToggleSwitch v-model="draft.expandDiffs" :label="t('Expand file diffs')" /></div>
             <div class="setting-row"><label><strong>{{ t('Rich Markdown diff') }}</strong><span>{{ t('Open Markdown changes in rendered view when available') }}</span></label><ToggleSwitch v-model="draft.richMarkdownByDefault" :label="t('Rich Markdown diff')" /></div>
           </template>
