@@ -1,32 +1,28 @@
 # Ming
 
-Ming is a local-first code review workspace for Git repositories on your computer. Its interface is built with Vue 3. Browse files, inspect working-tree changes, and revisit saved reviews in a browser. Repository access and Git inspection run locally; Ming does not require an account or a hosted service.
+**Review what changed, one topic at a time.**
 
-> Ming is under active development. AI topic reviews are available with a user-provided DeepSeek API key; AI-generated explanations must be checked against the diff.
+Ming is a browser-based workspace for reviewing local Git changes. It turns a large working-tree diff into reviewable topics, keeps each topic linked to the original code, and lets you record what you have checked. The repository stays on your computer; there is no Ming account or application server.
 
-## Why Ming?
+[简体中文](README.zh-CN.md) · [English](README.md)
 
-Tools such as Codex, Claude Code, and other AI coding assistants can edit many files in one pass. Their summaries explain what they intended to do, but it is still easy to lose track of what actually changed in the working tree. Accepting those changes should not feel like opening a black box.
+## Why Ming
 
-Ming adds a review step after an AI coding pass. Scan the local changes, browse the affected files, and read the diff before deciding what to keep. Saved reviews let you return to the same changes later. The goal is to make AI-assisted development easier to inspect and understand, one change at a time.
+An AI coding assistant can change dozens of files in one pass. A summary of its intent is useful, but the decision to keep the work depends on the actual diff. Ming gives that decision its own workflow: compare the working tree, inspect changes by purpose, and track review progress without losing the connection to individual lines.
 
-## Screenshot
+### Highlights
 
-![Ming Settings showing appearance preferences](docs/screenshots/settings.jpg)
+- **A review stack organized by intent.** Ask DeepSeek to group change ranges into topics. Each topic has a summary, checks, and its relevant diff. Mark it reviewed or flag it for another look. Unassigned ranges remain visible.
+- **Local changes stay in view.** Ming watches a repository while the page is open, using `FileSystemObserver` where available and a timer otherwise. Scans run in a worker, respect `.gitignore`, and update one review per source/target branch pair. A manual scan is always available.
+- **Old topics are never silently presented as current.** When the diff changes, Ming keeps the previous topics and their original diff, marks them out of date, and offers regeneration. The old topics remain visible while new ones are generated; review status starts fresh with the replacement.
+- **AI titles without blocking review.** A changed review first shows its file count. With a DeepSeek key configured, a background task generates a short title and replaces that count when ready. Failure leaves the file count in place.
+- **A browser-hosted Rust AI harness.** Rust/WebAssembly plans and validates review tasks; a browser worker executes provider requests. The same harness handles topic reviews and titles, with bounded context and snapshot checks that prevent an old result from overwriting a newer diff.
+- **Inspect more than the AI summary.** Browse files, jump through a changed-file tree, read syntax-highlighted diffs, compare local commit history with remote-tracking refs, and view Markdown changes as source or a rendered Rich diff.
+- **Know where data goes.** Ming reads the selected repository without writing to it. Projects and reviews live in browser storage. AI usage, including request and token details, is visible by project in MING Console.
 
-## What Ming can do
+## Get started
 
-- **Review local changes.** Compare the working tree against `HEAD` or another local Git ref, including staged, unstaged, and untracked files. Scans run in a worker and can be canceled.
-- **Read diffs in context.** Browse all changed files in one continuous view, jump between files with the directory tree, and use syntax highlighting and line numbers.
-- **Review by topic.** Explicitly send a saved diff to DeepSeek to group changed ranges into topics, then mark each topic reviewed or needing another look. Unassigned changes remain visible.
-- **Preview Markdown changes.** Switch between source and a rendered Rich diff that marks added and removed blocks.
-- **Explore the repository.** Browse files and folders with `.gitignore` filtering, preview UTF-8 files, and render a folder's README. The Branches page shows local branches without switching them.
-- **Inspect local commit history.** A review's Commits tab compares the captured local commit with its locally stored remote-tracking ref. Ming does not fetch remote refs.
-- **Keep reviews in the browser.** A new scan preserves older snapshots when the diff changes. Projects, reviews, AI topics, and human review progress survive page reloads in browser storage.
-
-## Quick start
-
-You need Node.js, Rust with the `wasm32-unknown-unknown` target, and `wasm-pack`.
+You need Node.js, Rust with the `wasm32-unknown-unknown` target, `wasm-pack`, and a browser with the File System Access API. Folder selection requires a secure context such as localhost or HTTPS; a current Chromium-based browser is recommended.
 
 ```sh
 npm ci
@@ -35,74 +31,51 @@ npm run build:wasm
 npm run dev
 ```
 
-Open the local URL printed by Vite in a browser that supports `showDirectoryPicker` (for example, a current Chromium-based browser). Folder access requires localhost or HTTPS.
+Open the local URL printed by Vite, then:
 
-To make a production build:
+1. **Add project** and select the root of a local Git repository containing a `.git` directory. Ming asks for read access.
+2. Open **Reviews**. Live updates are enabled by default for new projects, or you can click **Scan changes**. By default, the current branch is compared with its local remote-tracking ref; choose another ref in project settings if needed.
+3. Read **Changes** and **Commits**. To use **Topics**, add a DeepSeek API key in **MING Console → Copilot**, then click **Generate AI topics**. Topic generation is manual; scanning does not start it.
+4. Review each topic against its diff. When the diff changes, regenerate the out-of-date topics and review them again.
 
-```sh
-npm run build
-```
+The interface supports English and Chinese. Project and review URLs are shareable, but another browser or profile must add the repository and grant folder access separately.
 
-Serve the generated `dist/` directory from a static HTTP server configured to fall back to `index.html` for app URLs such as `/projects/` and `/console/`. Vite produces a single HTML entry and separate JavaScript chunks for the Vue Router pages; project file and review views load when opened. The browser's directory-access requirements still apply.
+## How Ming works
 
-### GitHub Pages
-
-The [Pages workflow](.github/workflows/deploy-pages.yml) builds and deploys the site on pushes to `main`, or when started manually from GitHub Actions. In the repository's **Settings → Pages**, select **GitHub Actions** as the publishing source. The published URL for this repository is `https://yorkie.github.io/ming/`.
-
-The workflow builds with the `/ming/` base path and generates static entry files for `/projects/` and `/console/`. A `/settings/` entry remains for old links and redirects to Console. These files all load the same Vue application; route components remain separate JavaScript chunks. A `404.html` copy lets other client-side routes render on GitHub Pages, although those fallback responses retain HTTP 404 status.
-
-## Use it
-
-1. Click **Add project** and choose a Git repository root containing a `.git` directory. Ming requests read access to that folder.
-2. Open **Files** to browse the working tree. Open **Reviews** and click **Scan changes** to compare it with the project's configured ref (`HEAD` by default).
-3. Open a saved review to inspect **Topics**, **Changes**, or **Commits**. To generate topics, add a DeepSeek API key under global **Settings → Copilot**, then click **Generate AI topics**. Project **Settings** controls its name and comparison ref.
-
-Reviews and file pages have shareable URLs using the `/projects/` page and query parameters. Opening one in another browser or profile still requires that browser to have the project saved and permission to read its folder.
-
-## Local data and privacy
-
-Ming reads the selected repository but does not write to it. It stores project directory handles and review snapshots in IndexedDB, and shared display preferences in local storage. Removing a project in Ming removes its browser records, not the repository on disk. Your browser may ask for read permission again after a reload.
-
-Project source is not uploaded to a Ming server. Generating AI topics sends the saved diff directly from your browser to DeepSeek. The DeepSeek key is stored in browser local storage; it is not included in saved review records. Markdown previews sanitize embedded HTML. External images referenced by Markdown may still load from their original URLs.
-
-## How it works
-
-| Part | Responsibility |
+| Layer | Role |
 | --- | --- |
-| `src/lib/localRepository.ts` | Read-only File System Access adapter for `isomorphic-git` |
-| `src/workers/scanWorker.ts` | Working-tree scan and diff creation off the UI thread |
-| `crates/ming-core` | Rust diff parsing and AI task state machine, batching, snapshot hashing, and output validation compiled to WebAssembly |
-| `src/workers/aiReviewWorker.ts` | Browser host for DeepSeek requests and progress messages; Rust owns task transitions |
-| `src/lib/projectFiles.ts` | Folder browsing, `.gitignore` filtering, and file previews |
-| `src/lib/projectStore.ts` | IndexedDB storage for projects and saved reviews |
-| `src/lib/appRouter.ts` and `src/pages/` | History-based Vue routes for Projects, Settings, and the project workspace |
-| `src/components/` | File browsing, diff, navigation, and custom control components |
+| File System Access API + `isomorphic-git` | Read the local repository, working tree, and locally available Git refs |
+| Scan and AI workers | Keep Git inspection and provider requests off the UI thread |
+| Rust `ming-core` compiled to WebAssembly | Parse diffs, hash snapshots, plan bounded AI tasks, and validate model output |
+| IndexedDB | Store project handles, one review per branch pair, topics, review status, and AI usage |
+| Vue 3 | Present files, diffs, topics, background tasks, and MING Console |
 
-The app is static and can be served without an application backend.
-See [the browser AI harness design](docs/ai-harness.md) for the task protocol and its limits.
+Ming makes no Git fetch, push, commit, checkout, or repository-file changes. It does not require its own backend. Future acceleration through Jev is a design consideration, not an active integration.
 
-## Current limitations
+### Privacy and AI requests
 
-- Repositories need a `.git` **directory**. Linked worktrees with a `.git` file are not supported yet.
-- A scan handles up to 200 changed files. Binary files and text files larger than 2 MB do not receive text diffs.
-- Rich Markdown diff snapshots require at most 1 MB of combined before/after text. Older saved reviews may need a rescan if their snapshot cannot be reconstructed.
-- File previews are limited to UTF-8 text. The default limit is 500 KB and can be changed in Settings.
-- Commit comparison uses local remote-tracking refs; Ming does not fetch or push.
-- AI topics are explanations and reading groups, not automated correctness findings. Agent writeback and Jev acceleration are future work.
-- AI context for each change range is capped, and large diffs are processed in batches. The full local diff remains available in Changes.
-- Browser file access may not support repositories that rely on symbolic links or external Git object storage.
+The DeepSeek API key is stored in this browser's local storage. With a key configured, **scanning a changed diff automatically sends bounded diff context directly from the browser to DeepSeek to generate a review title**. **Topic generation sends the saved diff to DeepSeek only when you start or restart that task.** Ming does not upload repository content to a Ming server. Removing a project deletes its browser records, not its files on disk.
 
-## Contributing
-
-Issues and pull requests are welcome. Before opening a pull request, run:
+## Build and contribute
 
 ```sh
 npm run check
 npm run build
 ```
 
-Keep repository access read-only and add focused tests for changes to Git inspection, persistence, or diff parsing.
+`npm run build` creates a static site in `dist/`. A static host should serve `index.html` for client-side routes such as `/projects/` and `/console/`. The [GitHub Pages workflow](.github/workflows/deploy-pages.yml) prepares direct-link entry files for those routes.
+
+Keep repository access read-only and add focused tests for Git inspection, persistence, or Rust task behavior.
+
+## Current limits
+
+- Repositories must have a `.git` directory; linked worktrees with a `.git` file are not supported.
+- A scan handles up to 200 changed files and stops after 500 scanned directories. Binary files and text files over 2 MB do not get text diffs.
+- Rich Markdown diff requires at most 1 MB of combined before/after text. File previews are UTF-8 text, with a configurable size limit.
+- Commit comparison reads local remote-tracking refs; Ming does not contact a Git remote to refresh them.
+- Browser folder permissions and IndexedDB data belong to that browser profile and origin. Live updates run only while Ming is open.
+- AI topics are review aids, not correctness verdicts. Large diffs may exceed the AI context budget; the complete local diff remains available in **Changes**.
 
 ## License
 
-A license has not been selected for this repository yet.
+A license has not been selected yet.
