@@ -12,4 +12,8 @@ assert.deepEqual(parseGlobalSettings('{"copilotProvider":"deepseek","copilotDeep
   ...defaultGlobalSettings, copilotDeepSeekApiKey: 'test-key', copilotModel: 'deepseek-v4-pro',
 });
 assert.deepEqual(parseGlobalSettings('invalid'), defaultGlobalSettings);
+assert.deepEqual(parseGlobalSettings('{"language":"zh-CN","copilotSummaryLanguage":"zh-CN","copilotReviewLanguage":"zh-CN"}'), {
+  ...defaultGlobalSettings, language: 'zh-CN', copilotSummaryLanguage: 'zh-CN', copilotReviewLanguage: 'zh-CN',
+});
+assert.deepEqual(parseGlobalSettings('{"language":"invalid","copilotSummaryLanguage":"invalid","copilotReviewLanguage":"invalid"}'), defaultGlobalSettings);
 console.log('Global settings test passed');

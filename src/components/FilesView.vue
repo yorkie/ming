@@ -6,6 +6,7 @@ import { resolveProjectAssetPath, type ProjectPath } from '../lib/projectFiles';
 import type { GlobalSettings } from '../lib/globalSettings';
 import { renderMarkdownDocument } from '../lib/markdownDocument';
 import { highlightLines } from '../lib/syntaxHighlight';
+import { language, t } from '../lib/i18n';
 
 const props = defineProps<{ project: Project; gitInfo: RepositoryInfo | null; path: string; data: ProjectPath | null; busy: boolean; error: string; settings: GlobalSettings }>();
 const emit = defineEmits<{ navigate: [path: string]; refresh: [] }>();
@@ -15,7 +16,7 @@ const directory = computed(() => props.data?.kind === 'directory' ? props.data :
 const entryCommits = shallowRef<Record<string, CommitSummary | null>>({});
 const commitsBusy = ref(false);
 const now = ref(Date.now());
-const clock = setInterval(() => { now.value = Date.now(); }, 60_000);
+const clock = typeof window !== 'undefined' ? setInterval(() => { now.value = Date.now(); }, 60_000) : null;
 let commitRequest = 0;
 watch(() => [props.project.id, props.path, props.data, props.gitInfo?.headOid], async () => {
   const request = ++commitRequest;
@@ -69,38 +70,38 @@ async function hydrateImages() {
 }
 watch(() => [props.project.id, props.path, props.data, props.settings.showReadmePreview], () => { clearImages(); void hydrateImages(); }, { immediate: true });
 onUnmounted(clearImages);
-onUnmounted(() => { commitRequest++; clearInterval(clock); });
+onUnmounted(() => { commitRequest++; if (clock) clearInterval(clock); });
 function commitTime(timestamp: number) {
   const date = new Date(timestamp * 1000);
   const seconds = Math.floor((now.value - date.getTime()) / 1000);
   if (seconds < 0) return date.toLocaleDateString();
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) { const minutes = Math.floor(seconds / 60); return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`; }
-  if (seconds < 86_400) { const hours = Math.floor(seconds / 3600); return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`; }
+  if (seconds < 60) return language.value === 'zh-CN' ? '刚刚' : 'just now';
+  if (seconds < 3600) { const minutes = Math.floor(seconds / 60); return language.value === 'zh-CN' ? `${minutes} 分钟前` : `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`; }
+  if (seconds < 86_400) { const hours = Math.floor(seconds / 3600); return language.value === 'zh-CN' ? `${hours} 小时前` : `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`; }
   const days = Math.floor(seconds / 86_400);
-  if (days === 1) return 'yesterday';
-  if (days < 30) return `${days} days ago`;
+  if (days === 1) return language.value === 'zh-CN' ? '昨天' : 'yesterday';
+  if (days < 30) return language.value === 'zh-CN' ? `${days} 天前` : `${days} days ago`;
   return date.toLocaleDateString();
 }
 </script>
 
 <template>
   <div ref="root" class="project-files-page">
-    <div class="project-files-title"><div><h1>Files</h1><p>Browse the local working tree{{ gitInfo?.currentBranch ? ` on ${gitInfo.currentBranch}` : '' }}.</p></div><button type="button" class="button-outline" @click="emit('refresh')"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button></div>
-    <nav v-if="parts.length" class="project-files-breadcrumbs" aria-label="File path"><button type="button" @click="emit('navigate', '')">{{ project.name }}</button><template v-for="(part, index) in parts" :key="index"><span aria-hidden="true">/</span><strong v-if="index === parts.length - 1">{{ part }}</strong><button v-else type="button" @click="emit('navigate', parentPath(index))">{{ part }}</button></template></nav>
-    <div v-if="busy" class="files-state" role="status"><i class="bi bi-arrow-clockwise icon-spin" aria-hidden="true"></i> Loading files…</div>
+    <div class="project-files-title"><div><h1>{{ t('Files') }}</h1><p>{{ language === 'zh-CN' ? `浏览${gitInfo?.currentBranch ? ` ${gitInfo.currentBranch} 分支` : ''}的本地工作区。` : `Browse the local working tree${gitInfo?.currentBranch ? ` on ${gitInfo.currentBranch}` : ''}.` }}</p></div><button type="button" class="button-outline" @click="emit('refresh')"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> {{ t('Refresh') }}</button></div>
+    <nav v-if="parts.length" class="project-files-breadcrumbs" :aria-label="t('File path')"><button type="button" @click="emit('navigate', '')">{{ project.name }}</button><template v-for="(part, index) in parts" :key="index"><span aria-hidden="true">/</span><strong v-if="index === parts.length - 1">{{ part }}</strong><button v-else type="button" @click="emit('navigate', parentPath(index))">{{ part }}</button></template></nav>
+    <div v-if="busy" class="files-state" role="status"><i class="bi bi-arrow-clockwise icon-spin" aria-hidden="true"></i> {{ t('Loading files…') }}</div>
     <div v-else-if="error" class="files-state error" role="status">{{ error }}</div>
     <template v-else-if="directory">
-      <section class="project-file-list"><div class="project-file-heading project-file-list-heading"><template v-if="directory.path"><i class="bi bi-folder2-open" aria-hidden="true"></i><strong>{{ parts.at(-1) }}</strong></template><div class="project-file-repository-meta"><span class="project-file-branch" title="Current branch"><i class="bi bi-git" aria-hidden="true"></i> {{ gitInfo?.currentBranch ?? 'Detached HEAD' }}</span><span class="project-file-commit" :title="gitInfo?.latestCommit ? `${gitInfo.latestCommit.title} · ${gitInfo.latestCommit.author}` : 'No commits yet'"><i class="bi bi-clock-history" aria-hidden="true"></i><span>{{ gitInfo?.latestCommit?.title ?? 'No commits yet' }}</span><code v-if="gitInfo?.latestCommit">{{ gitInfo.latestCommit.oid.slice(0, 7) }}</code></span></div><span class="project-file-item-count">{{ directory.entries.length }} {{ directory.entries.length === 1 ? 'item' : 'items' }}</span></div>
-        <button v-for="entry in directory.entries" :key="entry.name" type="button" class="project-file-row" @click="emit('navigate', childPath(entry.name))"><span class="project-file-icon" :class="`project-file-icon--${entry.kind}`"><i :class="entry.kind === 'directory' ? 'bi bi-folder-fill' : 'bi bi-file-earmark-text'" aria-hidden="true"></i></span><span class="project-file-name">{{ entry.name }}</span><span class="project-file-row-commit" :title="entryCommits[entry.name] ? `${entryCommits[entry.name]!.title} · ${entryCommits[entry.name]!.author} · ${entryCommits[entry.name]!.oid.slice(0, 7)}` : ''">{{ entryCommits[entry.name]?.title ?? (commitsBusy ? 'Loading history…' : 'Untracked or history unavailable') }}</span><time v-if="entryCommits[entry.name]" class="project-file-row-time" :datetime="new Date(entryCommits[entry.name]!.timestamp * 1000).toISOString()" :title="new Date(entryCommits[entry.name]!.timestamp * 1000).toLocaleString()">{{ commitTime(entryCommits[entry.name]!.timestamp) }}</time><span v-else class="project-file-row-time"></span></button>
-        <div v-if="!directory.entries.length" class="files-state">This folder is empty.</div>
+      <section class="project-file-list"><div class="project-file-heading project-file-list-heading"><template v-if="directory.path"><i class="bi bi-folder2-open" aria-hidden="true"></i><strong>{{ parts.at(-1) }}</strong></template><div class="project-file-repository-meta"><span class="project-file-branch" :title="t('Current branch')"><i class="bi bi-git" aria-hidden="true"></i> {{ gitInfo?.currentBranch ?? t('Detached HEAD') }}</span><span class="project-file-commit" :title="gitInfo?.latestCommit ? `${gitInfo.latestCommit.title} · ${gitInfo.latestCommit.author}` : t('No commits yet')"><i class="bi bi-clock-history" aria-hidden="true"></i><span>{{ gitInfo?.latestCommit?.title ?? t('No commits yet') }}</span><code v-if="gitInfo?.latestCommit">{{ gitInfo.latestCommit.oid.slice(0, 7) }}</code></span></div><span class="project-file-item-count">{{ language === 'zh-CN' ? `${directory.entries.length} 项` : `${directory.entries.length} ${directory.entries.length === 1 ? 'item' : 'items'}` }}</span></div>
+        <button v-for="entry in directory.entries" :key="entry.name" type="button" class="project-file-row" @click="emit('navigate', childPath(entry.name))"><span class="project-file-icon" :class="`project-file-icon--${entry.kind}`"><i :class="entry.kind === 'directory' ? 'bi bi-folder-fill' : 'bi bi-file-earmark-text'" aria-hidden="true"></i></span><span class="project-file-name">{{ entry.name }}</span><span class="project-file-row-commit" :title="entryCommits[entry.name] ? `${entryCommits[entry.name]!.title} · ${entryCommits[entry.name]!.author} · ${entryCommits[entry.name]!.oid.slice(0, 7)}` : ''">{{ entryCommits[entry.name]?.title ?? t(commitsBusy ? 'Loading history…' : 'Untracked or history unavailable') }}</span><time v-if="entryCommits[entry.name]" class="project-file-row-time" :datetime="new Date(entryCommits[entry.name]!.timestamp * 1000).toISOString()" :title="new Date(entryCommits[entry.name]!.timestamp * 1000).toLocaleString()">{{ commitTime(entryCommits[entry.name]!.timestamp) }}</time><span v-else class="project-file-row-time"></span></button>
+        <div v-if="!directory.entries.length" class="files-state">{{ t('This folder is empty.') }}</div>
       </section>
-      <section v-if="settings.showReadmePreview && directory.readme" class="project-readme"><div class="project-file-heading"><i class="bi bi-book" aria-hidden="true"></i><strong>{{ directory.readme.name }}</strong></div><div v-if="directory.readme.content.text === null" class="files-state">{{ directory.readme.content.reason === 'large' ? `README preview is limited to ${settings.filePreviewLimitKb} KB.` : 'README is not UTF-8 text.' }}</div><div v-else v-html="readmeHtml"></div></section>
+      <section v-if="settings.showReadmePreview && directory.readme" class="project-readme"><div class="project-file-heading"><i class="bi bi-book" aria-hidden="true"></i><strong>{{ directory.readme.name }}</strong></div><div v-if="directory.readme.content.text === null" class="files-state">{{ directory.readme.content.reason === 'large' ? language === 'zh-CN' ? `README 预览上限为 ${settings.filePreviewLimitKb} KB。` : `README preview is limited to ${settings.filePreviewLimitKb} KB.` : t('README is not UTF-8 text.') }}</div><div v-else v-html="readmeHtml"></div></section>
     </template>
-    <section v-else-if="file" class="project-file-preview"><div class="project-file-heading"><i class="bi bi-file-earmark-text" aria-hidden="true"></i><strong>{{ file.name }}</strong><span>Read-only preview</span></div>
-      <div v-if="fileText === null" class="files-state">{{ file.content.reason === 'large' ? `File preview is limited to ${settings.filePreviewLimitKb} KB.` : 'Binary or non-UTF-8 file. Preview unavailable.' }}</div>
+    <section v-else-if="file" class="project-file-preview"><div class="project-file-heading"><i class="bi bi-file-earmark-text" aria-hidden="true"></i><strong>{{ file.name }}</strong><span>{{ t('Read-only preview') }}</span></div>
+      <div v-if="fileText === null" class="files-state">{{ file.content.reason === 'large' ? language === 'zh-CN' ? `文件预览上限为 ${settings.filePreviewLimitKb} KB。` : `File preview is limited to ${settings.filePreviewLimitKb} KB.` : t('Binary or non-UTF-8 file. Preview unavailable.') }}</div>
       <div v-else-if="markdownFile" v-html="fileMarkdownHtml"></div>
-      <div v-else-if="!sourceLines.length" class="files-state">This file is empty.</div>
+      <div v-else-if="!sourceLines.length" class="files-state">{{ t('This file is empty.') }}</div>
       <div v-else class="project-source"><div v-for="(line, index) in sourceLines" :key="index" class="project-source-row"><span class="project-source-number">{{ index + 1 }}</span><span class="project-source-text code-source" v-html="line"></span></div></div>
     </section>
   </div>

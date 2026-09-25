@@ -8,6 +8,7 @@ import type { Review } from '../src/lib/reviewTypes';
 
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
 try {
+  const { setLanguage } = await server.ssrLoadModule('/src/lib/i18n.ts');
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
   const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
@@ -39,6 +40,16 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  setLanguage('zh-CN');
+  const chineseTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: topicRecord, data, settings: defaultGlobalSettings }));
+  assert.match(chineseTopicHtml, /标记已评审/);
+  const chineseReviewsHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [record], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(chineseReviewsHtml, /改动文件/);
+  setLanguage('en');
   console.log('Vue view rendering test passed');
 } finally {
   await server.close();

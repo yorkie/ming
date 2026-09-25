@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import type { Project } from '../lib/projectStore';
 import type { GlobalSettingsSection } from '../lib/routes';
+import { t } from '../lib/i18n';
 
 type Page = 'files' | 'reviews' | 'branches' | 'settings';
 const props = defineProps<{
@@ -56,29 +57,29 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
     <header class="masthead">
       <button id="home" class="wordmark" aria-label="Ming home" @click="emit('home')"><span class="wordmark-sign">M</span><span>ming<span class="wordmark-point">.</span></span></button>
       <div class="top-project-picker">
-        <span class="project-picker-label">Projects</span>
+        <span class="project-picker-label">{{ t('Projects') }}</span>
         <div ref="picker" class="project-picker" @keydown="pickerKey">
-          <button id="project-picker-trigger" type="button" class="project-picker-trigger" aria-label="Select a project" aria-haspopup="true" :aria-expanded="pickerOpen" aria-controls="project-picker-menu" @click="pickerOpen = !pickerOpen"><span>{{ activeProject?.name ?? 'All projects' }}</span><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
-          <nav v-show="pickerOpen" id="project-picker-menu" class="project-picker-menu" aria-label="Projects">
-            <button ref="options" type="button" class="project-picker-option" :class="{ selected: !activeProject }" :aria-current="!activeProject" @click="chooseProject(null)"><span class="project-picker-option-name">All projects</span><i v-if="!activeProject" class="bi bi-check2" aria-hidden="true"></i></button>
+          <button id="project-picker-trigger" type="button" class="project-picker-trigger" :aria-label="t('Select a project')" aria-haspopup="true" :aria-expanded="pickerOpen" aria-controls="project-picker-menu" @click="pickerOpen = !pickerOpen"><span>{{ activeProject?.name ?? t('All projects') }}</span><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
+          <nav v-show="pickerOpen" id="project-picker-menu" class="project-picker-menu" :aria-label="t('Projects')">
+            <button ref="options" type="button" class="project-picker-option" :class="{ selected: !activeProject }" :aria-current="!activeProject" @click="chooseProject(null)"><span class="project-picker-option-name">{{ t('All projects') }}</span><i v-if="!activeProject" class="bi bi-check2" aria-hidden="true"></i></button>
             <button v-for="project in projects" :key="project.id" ref="options" type="button" class="project-picker-option" :class="{ selected: activeProject?.id === project.id }" :aria-current="activeProject?.id === project.id" @click="chooseProject(project.id)"><span class="project-picker-option-name">{{ project.name }}</span><i v-if="activeProject?.id === project.id" class="bi bi-check2" aria-hidden="true"></i></button>
           </nav>
         </div>
-        <button id="add-project-small" class="button-outline" title="Add project" @click="emit('addProject')"><i class="bi bi-plus" aria-hidden="true"></i> Add project</button>
+        <button id="add-project-small" class="button-outline" :title="t('Add project')" @click="emit('addProject')"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button>
       </div>
       <span class="masthead-side">MING / CODE REVIEW</span>
     </header>
     <div class="app-body">
       <aside class="rail">
-        <div v-if="mode === 'settings'" class="rail-section"><div class="rail-heading"><span>Console sections</span></div><nav class="project-nav" aria-label="Console sections"><button v-for="category in categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ category.label }}</span></button></nav></div>
-        <div v-else-if="activeProject" class="rail-section"><div class="rail-heading"><span>Project navigation</span></div><nav class="project-nav" aria-label="Project pages">
-          <button type="button" :class="{ active: page === 'files' }" @click="emit('selectPage', 'files')"><i class="bi bi-folder2" aria-hidden="true"></i><span class="project-nav-text">Files</span></button>
-          <button type="button" :class="{ active: page === 'reviews' }" @click="emit('selectPage', 'reviews')"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span class="project-nav-text">Reviews</span><span class="project-nav-count">{{ reviewCount ?? 0 }}</span></button>
-          <button type="button" :class="{ active: page === 'branches' }" @click="emit('selectPage', 'branches')"><i class="bi bi-git" aria-hidden="true"></i><span class="project-nav-text">Branches</span><span class="project-nav-count">{{ branchCount ?? '—' }}</span></button>
-          <button type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">Settings</span></button>
+        <div v-if="mode === 'settings'" class="rail-section"><div class="rail-heading"><span>{{ t('Console sections') }}</span></div><nav class="project-nav" :aria-label="t('Console sections')"><button v-for="category in categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ t(category.label) }}</span></button></nav></div>
+        <div v-else-if="activeProject" class="rail-section"><div class="rail-heading"><span>{{ t('Project navigation') }}</span></div><nav class="project-nav" :aria-label="t('Project pages')">
+          <button type="button" :class="{ active: page === 'files' }" @click="emit('selectPage', 'files')"><i class="bi bi-folder2" aria-hidden="true"></i><span class="project-nav-text">{{ t('Files') }}</span></button>
+          <button type="button" :class="{ active: page === 'reviews' }" @click="emit('selectPage', 'reviews')"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span class="project-nav-text">{{ t('Reviews') }}</span><span class="project-nav-count">{{ reviewCount ?? 0 }}</span></button>
+          <button type="button" :class="{ active: page === 'branches' }" @click="emit('selectPage', 'branches')"><i class="bi bi-git" aria-hidden="true"></i><span class="project-nav-text">{{ t('Branches') }}</span><span class="project-nav-count">{{ branchCount ?? '—' }}</span></button>
+          <button type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">{{ t('Settings') }}</span></button>
         </nav></div>
-        <div v-else class="rail-section"><div class="rail-heading"><span>Workspace</span></div><p class="rail-empty">Select a project above.</p></div>
-        <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" aria-label="MING Console" title="MING Console" @click="emit('globalSettings')"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>MING Console</span></button></div>
+        <div v-else class="rail-section"><div class="rail-heading"><span>{{ t('Workspace') }}</span></div><p class="rail-empty">{{ t('Select a project above.') }}</p></div>
+        <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" :aria-label="t('MING Console')" :title="t('MING Console')" @click="emit('globalSettings')"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>{{ t('MING Console') }}</span></button></div>
       </aside>
       <main class="workspace"><div class="page" :class="{ 'reviews-page': reviewLayout }"><slot /></div><slot name="toast" /></main>
     </div>

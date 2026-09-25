@@ -1,4 +1,5 @@
 export type GlobalSettings = {
+  language: 'en' | 'zh-CN';
   codeFontSize: number;
   codeLineHeight: number;
   syntaxHighlighting: boolean;
@@ -9,6 +10,8 @@ export type GlobalSettings = {
   expandDiffs: boolean;
   richMarkdownByDefault: boolean;
   copilotModel: 'deepseek-flash' | 'deepseek-v4-pro';
+  copilotSummaryLanguage: 'en' | 'zh-CN';
+  copilotReviewLanguage: 'en' | 'zh-CN';
   copilotDeepSeekApiKey: string;
 };
 
@@ -16,11 +19,12 @@ const STORAGE_KEY = 'ming-global-settings-v2';
 const LEGACY_STORAGE_KEY = 'ming-global-settings-v1';
 
 export const defaultGlobalSettings: GlobalSettings = {
+  language: 'en',
   codeFontSize: 13, codeLineHeight: 24,
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
   defaultReviewTab: 'topics', expandDiffs: true, richMarkdownByDefault: false,
-  copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '',
+  copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '', copilotSummaryLanguage: 'en', copilotReviewLanguage: 'en',
 };
 
 export function parseGlobalSettings(value: string | null): GlobalSettings {
@@ -33,6 +37,7 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
     const flag = (value: unknown, fallback: boolean): boolean => typeof value === 'boolean' ? value : fallback;
     const shortText = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
     return {
+      language: choice(settings.language, ['en', 'zh-CN'], defaultGlobalSettings.language),
       codeFontSize: choice(settings.codeFontSize, [12, 13, 14, 15, 16], defaultGlobalSettings.codeFontSize),
       codeLineHeight: choice(settings.codeLineHeight, [20, 24, 28, 32], defaultGlobalSettings.codeLineHeight),
       syntaxHighlighting: flag(settings.syntaxHighlighting, true),
@@ -43,6 +48,8 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
       expandDiffs: flag(settings.expandDiffs, true),
       richMarkdownByDefault: flag(settings.richMarkdownByDefault, false),
       copilotModel: choice(settings.copilotModel, ['deepseek-flash', 'deepseek-v4-pro'], defaultGlobalSettings.copilotModel),
+      copilotSummaryLanguage: choice(settings.copilotSummaryLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotSummaryLanguage),
+      copilotReviewLanguage: choice(settings.copilotReviewLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotReviewLanguage),
       copilotDeepSeekApiKey: shortText(settings.copilotDeepSeekApiKey, 500),
     };
   } catch { return { ...defaultGlobalSettings }; }

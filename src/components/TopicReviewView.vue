@@ -6,6 +6,7 @@ import type { Review } from '../lib/reviewTypes';
 import type { Topic } from '../lib/aiReviewTypes';
 import { renderMarkdownInline } from '../lib/markdownDocument';
 import DiffFile from './DiffFile.vue';
+import { language, t } from '../lib/i18n';
 
 const props = defineProps<{ project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings }>();
 const emit = defineEmits<{ markTopic: [id: string, status: 'reviewed' | 'needs-work' | null] }>();
@@ -52,18 +53,18 @@ async function selectTopic(id: string) {
 </script>
 
 <template>
-  <div ref="reviewRoot" class="topic-review"><aside class="topic-list" aria-label="Review topics"><div class="topic-list-heading"><strong>Review topics</strong><span>{{ completed }} / {{ topics.length }} reviewed</span></div><button v-for="(topic, index) in topics" :key="topic.id" type="button" class="topic-list-item" :class="{ active: activeId === topic.id }" @click="selectTopic(topic.id)"><span class="topic-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ topic.title }}</strong><small>{{ topic.unitIds.length }} change {{ topic.unitIds.length === 1 ? 'range' : 'ranges' }} · {{ status(topic) === 'reviewed' ? 'Reviewed' : status(topic) === 'needs-work' ? 'Needs another look' : 'To review' }}</small></span></button></aside>
+  <div ref="reviewRoot" class="topic-review"><aside class="topic-list" :aria-label="t('Review topics')"><div class="topic-list-heading"><strong>{{ t('Review topics') }}</strong><span>{{ language === 'zh-CN' ? `${completed} / ${topics.length} 已评审` : `${completed} / ${topics.length} reviewed` }}</span></div><button v-for="(topic, index) in topics" :key="topic.id" type="button" class="topic-list-item" :class="{ active: activeId === topic.id }" @click="selectTopic(topic.id)"><span class="topic-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ topic.title }}</strong><small>{{ language === 'zh-CN' ? `${topic.unitIds.length} 处改动` : `${topic.unitIds.length} change ${topic.unitIds.length === 1 ? 'range' : 'ranges'}` }} · {{ t(status(topic) === 'reviewed' ? 'Reviewed' : status(topic) === 'needs-work' ? 'Needs another look' : 'To review') }}</small></span></button></aside>
     <section v-if="activeTopic" class="topic-detail">
-      <div class="topic-detail-heading"><span class="minor-heading">{{ activeTopic.id === 'uncategorized' ? 'UNASSIGNED CHANGE RANGES' : 'AI-ORGANIZED TOPIC · CHECK THE DIFF' }}</span><h3>{{ activeTopic.title }}</h3><p v-html="renderMarkdownInline(activeTopic.summary)"></p></div>
+      <div class="topic-detail-heading"><span class="minor-heading">{{ t(activeTopic.id === 'uncategorized' ? 'UNASSIGNED CHANGE RANGES' : 'AI-ORGANIZED TOPIC · CHECK THE DIFF') }}</span><h3>{{ activeTopic.title }}</h3><p v-html="renderMarkdownInline(activeTopic.summary)"></p></div>
       <div class="topic-checks">
         <div ref="originalActions" class="topic-checks-heading">
-          <strong>{{ activeTopic.checks.length ? 'What to check' : 'Review status' }}</strong>
-          <div class="topic-actions"><button type="button" class="button-outline" :aria-pressed="status(activeTopic) === 'needs-work'" @click="markTopic(activeTopic, 'needs-work')">{{ status(activeTopic) === 'needs-work' ? 'Clear flag' : 'Needs another look' }}</button><button type="button" class="button-primary" :aria-pressed="status(activeTopic) === 'reviewed'" @click="markTopic(activeTopic, 'reviewed')">{{ status(activeTopic) === 'reviewed' ? 'Mark as unread' : 'Mark reviewed' }}</button></div>
+          <strong>{{ t(activeTopic.checks.length ? 'What to check' : 'Review status') }}</strong>
+          <div class="topic-actions"><button type="button" class="button-outline" :aria-pressed="status(activeTopic) === 'needs-work'" @click="markTopic(activeTopic, 'needs-work')">{{ t(status(activeTopic) === 'needs-work' ? 'Clear flag' : 'Needs another look') }}</button><button type="button" class="button-primary" :aria-pressed="status(activeTopic) === 'reviewed'" @click="markTopic(activeTopic, 'reviewed')">{{ t(status(activeTopic) === 'reviewed' ? 'Mark as unread' : 'Mark reviewed') }}</button></div>
         </div>
         <ul v-if="activeTopic.checks.length"><li v-for="(check, index) in activeTopic.checks" :key="index" v-html="renderMarkdownInline(check)"></li></ul>
       </div>
       <div class="topic-diffs"><DiffFile v-for="entry in files" :key="`${record.id}:${activeTopic.id}:${entry.index}`" :file="entry.file" :index="entry.index" :hunk-indices="entry.hunkIndices" :project="project" :record="record" :data="data" :settings="settings" :selected="false" /></div>
     </section>
-    <div v-if="activeTopic && showFloatingActions" class="topic-floating-actions" :aria-label="`Review actions for ${activeTopic.title}`"><button type="button" class="button-outline" :aria-pressed="status(activeTopic) === 'needs-work'" @click="markTopic(activeTopic, 'needs-work')">{{ status(activeTopic) === 'needs-work' ? 'Clear flag' : 'Needs another look' }}</button><button type="button" class="button-primary" :aria-pressed="status(activeTopic) === 'reviewed'" @click="markTopic(activeTopic, 'reviewed')">{{ status(activeTopic) === 'reviewed' ? 'Mark as unread' : 'Mark reviewed' }}</button></div>
+    <div v-if="activeTopic && showFloatingActions" class="topic-floating-actions" :aria-label="`Review actions for ${activeTopic.title}`"><button type="button" class="button-outline" :aria-pressed="status(activeTopic) === 'needs-work'" @click="markTopic(activeTopic, 'needs-work')">{{ t(status(activeTopic) === 'needs-work' ? 'Clear flag' : 'Needs another look') }}</button><button type="button" class="button-primary" :aria-pressed="status(activeTopic) === 'reviewed'" @click="markTopic(activeTopic, 'reviewed')">{{ t(status(activeTopic) === 'reviewed' ? 'Mark as unread' : 'Mark reviewed') }}</button></div>
   </div>
 </template>

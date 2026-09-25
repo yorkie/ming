@@ -10,6 +10,8 @@ import AppShell from '../components/AppShell.vue';
 import { addLocalProject } from '../lib/addProject';
 import type { Review } from '../lib/reviewTypes';
 import type { AiRequestUsage, TopicArtifact } from '../lib/aiReviewTypes';
+import { language, t } from '../lib/i18n';
+import { localizeAiProgress } from '../lib/aiProgress';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
 type ReviewView = 'topics' | 'changes' | 'commits';
@@ -42,6 +44,7 @@ const scanBusy = ref(false);
 const scanProgress = ref('');
 const aiBusy = ref(false);
 const aiProgress = ref('');
+const displayedAiProgress = computed(() => localizeAiProgress(aiProgress.value, language.value));
 const aiCompleted = ref(0);
 const aiTotal = ref(0);
 const commitHistory = shallowRef<CommitHistory | null>(null);
@@ -53,7 +56,7 @@ let cancelCommitLoad: (() => void) | null = null;
 let cancelActiveScan: (() => void) | null = null;
 let cancelAiReview: (() => void) | null = null;
 
-function note(value: string, error = false) { message.value = value; messageError.value = error; }
+function note(value: string, error = false) { message.value = t(value); messageError.value = error; }
 function compactRoute(route: Route): Route {
   if (route.kind === 'home' || route.kind === 'global-settings') return route;
   const projectId = shortId(route.projectId, projects.value.map(item => item.id));
@@ -177,14 +180,14 @@ function scanInWorker(directory: FileSystemDirectoryHandle, baseRef: string): Pr
       else if (finish()) reject(new Error(response.message));
     };
     worker.onerror = event => { if (finish()) reject(new Error(event.message || 'Scan worker stopped unexpectedly')); };
-    worker.postMessage({ directory, baseRef });
+    worker.postMessage({ directory, baseRef, uiLanguage: language.value });
   });
 }
 async function scanProject() {
   const selected = project.value;
   if (!selected || scanBusy.value || aiBusy.value) return;
   cancelCommitLoad?.(); commitsBusy.value = false;
-  scanBusy.value = true; scanProgress.value = 'Preparing scan…'; message.value = ''; messageError.value = false;
+  scanBusy.value = true; scanProgress.value = t('Preparing scan…'); message.value = ''; messageError.value = false;
   try {
     const result = await scanInWorker(selected.directory, selected.settings.baseRef);
     gitInfo.value = result.gitInfo;
@@ -218,7 +221,7 @@ async function deleteSelectedReview() {
   const selected = record.value;
   const currentProject = project.value;
   if (!selected || !currentProject || scanBusy.value || aiBusy.value) return;
-  if (!window.confirm('Delete this review record and its topic review status from this browser?')) return;
+  if (!window.confirm(t('Delete this review record and its topic review status from this browser?'))) return;
   try {
     await deleteReview(selected.id);
     reviews.value = reviews.value.filter(item => item.id !== selected.id);
@@ -254,10 +257,11 @@ function cancelAi() { cancelAiReview?.(); }
 async function generateAiReview() {
   const selected = record.value;
   if (!selected || aiBusy.value || scanBusy.value) return;
-  const key = loadGlobalSettings().copilotDeepSeekApiKey.trim();
-  const model = loadGlobalSettings().copilotModel;
+  const copilot = loadGlobalSettings();
+  const key = copilot.copilotDeepSeekApiKey.trim();
+  const model = copilot.copilotModel;
   if (!key) { note('Add a DeepSeek API key in Copilot settings first.', true); return; }
-  aiBusy.value = true; aiProgress.value = 'Preparing topic review…'; aiCompleted.value = 0; aiTotal.value = 0; message.value = '';
+  aiBusy.value = true; aiProgress.value = t('Preparing topic review…'); aiCompleted.value = 0; aiTotal.value = 0; message.value = '';
   const worker = new Worker(new URL('../workers/aiReviewWorker.ts', import.meta.url), { type: 'module' });
   const usageWrites: Promise<void>[] = [];
   let usageSaveFailed = false;
@@ -279,7 +283,7 @@ async function generateAiReview() {
         }
       };
       worker.onerror = event => reject(new Error(event.message || 'AI review worker stopped unexpectedly'));
-      worker.postMessage({ reviewJson: selected.data, model, apiKey: key });
+      worker.postMessage({ reviewJson: selected.data, model, apiKey: key, summaryLanguage: copilot.copilotSummaryLanguage, reviewLanguage: copilot.copilotReviewLanguage, uiLanguage: language.value });
     });
     if (record.value?.id !== selected.id) return;
     const updated = { ...selected, aiReview: { artifact, reviewed: {}, createdAt: Date.now() } };
@@ -323,7 +327,7 @@ onUnmounted(() => { cancelCommitLoad?.(); cancelActiveScan?.(); cancelAiReview?.
     <div v-if="!project" class="empty-state"><h3>Project not found</h3><p>Select a project from the Projects page.</p><button class="button-outline" @click="navigate({ kind: 'home' })">Projects</button></div>
     <div v-else-if="permissionRequired" class="empty-state"><h3>Project access required</h3><p>Grant read access to open this project. Ming will not modify its files.</p><button class="button-primary" @click="applyRoute(true)">Grant access</button></div>
     <FilesView v-else-if="view === 'files'" :project="project" :git-info="gitInfo" :path="filePath" :data="fileView?.data ?? null" :busy="filesBusy" :error="filesError" :settings="settings" @navigate="selectFilePath" @refresh="refreshFiles" />
-    <ReviewsView v-else-if="view === 'reviews'" :key="activeReviewId ?? 'empty'" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy" :ai-progress="aiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
+    <ReviewsView v-else-if="view === 'reviews'" :key="activeReviewId ?? 'empty'" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
     <BranchesView v-else-if="view === 'branches'" :git-info="gitInfo" />
     <ProjectSettingsView v-else :project="project" :git-info="gitInfo" @save="saveProjectSettings" @remove="removeProject" />
     <template #toast><div v-if="!project && message" class="toast" :class="{ error: messageError }" role="status">{{ message }}<button aria-label="Dismiss message" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>

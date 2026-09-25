@@ -6,6 +6,7 @@ import { rememberReview, type Project, type ReviewRecord } from '../lib/projectS
 import type { GlobalSettings } from '../lib/globalSettings';
 import type { MarkdownSnapshot } from '../lib/localRepository';
 import type { FileChange, Hunk, Review } from '../lib/reviewTypes';
+import { t } from '../lib/i18n';
 const props = defineProps<{ file: FileChange; index: number; project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; selected: boolean; hunkIndices?: number[] }>();
 const expanded = ref(props.settings.expandDiffs);
 const snapshot = shallowRef<MarkdownSnapshot | null>(props.file.markdown ?? null);
@@ -13,8 +14,8 @@ const rich = ref(!props.hunkIndices && props.settings.richMarkdownByDefault && !
 const loading = ref(false);
 const error = ref('');
 const isMarkdown = computed(() => !props.hunkIndices && /\.md$/i.test(props.file.path));
-const emptyMessage = computed(() => ({ added: 'Empty file added.', deleted: 'Empty file deleted.', binary: 'Binary files have no text diff.' }[props.file.status] ?? 'No text diff.'));
-const statusLabel = computed(() => ({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', binary: 'Binary' }[props.file.status] ?? 'Modified'));
+const emptyMessage = computed(() => t(({ added: 'Empty file added.', deleted: 'Empty file deleted.', binary: 'Binary files have no text diff.' }[props.file.status] ?? 'No text diff.')));
+const statusLabel = computed(() => t(({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', binary: 'Binary' }[props.file.status] ?? 'Modified')));
 const highlightedHunks = computed(() => props.file.hunks.filter((_, index) => !props.hunkIndices || props.hunkIndices.includes(index)).map(hunk => ({ ...hunk, highlighted: props.settings.syntaxHighlighting ? highlightLines(props.file.path, hunk.lines.map(line => line.text)) : hunk.lines.map(line => escapeHtml(line.text)) })));
 const shownCounts = computed(() => props.hunkIndices ? {
   additions: highlightedHunks.value.reduce((sum, hunk) => sum + hunk.lines.filter(line => line.kind === 'add').length, 0),
