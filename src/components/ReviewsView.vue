@@ -20,8 +20,10 @@ const props = defineProps<{
   commitHistory: CommitHistory | null;
   commitsBusy: boolean;
   commitsError: string;
+  message?: string;
+  messageError?: boolean;
 }>();
-const emit = defineEmits<{ selectReview: [id: string]; selectTab: [tab: 'changes' | 'commits']; scan: []; cancelScan: []; retryCommits: [] }>();
+const emit = defineEmits<{ selectReview: [id: string]; selectTab: [tab: 'changes' | 'commits']; scan: []; cancelScan: []; retryCommits: []; dismissMessage: [] }>();
 const query = ref('');
 const collapsed = ref(new Set<string>());
 const selectedFileIndex = ref<number | null>(null);
@@ -44,7 +46,7 @@ function commitList(commits: CommitSummary[]) { return commits; }
 
 <template>
   <div class="reviews-layout" :class="{ 'review-view-commits': reviewView === 'commits' }"><aside class="review-history"><div class="review-history-title"><span class="section-index">01 / REVIEWS</span><h2>Reviews</h2></div><div class="minor-heading">Records <span>{{ reviews.length }}</span></div><button v-for="item in reviews" :key="item.id" type="button" class="history-row" :class="{ active: item.id === record?.id }" @click="emit('selectReview', item.id)"><span>{{ date(item.createdAt) }}</span><strong>{{ fileCountLabel(recordFileCount(item)) }}</strong><small>{{ item.branch ?? 'detached' }} <i class="bi bi-arrow-right" aria-hidden="true"></i> {{ item.baseRef }}</small></button></aside>
-    <div class="review-main"><div class="review-main-toolbar"><p>{{ reviewView === 'changes' ? 'Browse every file diff. Use the file tree to jump to a file.' : 'View commits ahead of or behind the remote tracking branch.' }}</p><button class="button-primary" @click="scanBusy ? emit('cancelScan') : emit('scan')"><i :class="scanBusy ? 'bi bi-x-lg' : 'bi bi-arrow-clockwise'" aria-hidden="true"></i> {{ scanBusy ? 'Cancel scan' : 'Scan changes' }}</button></div>
+    <div class="review-main"><div v-if="message" class="inline-message review-notice" :class="{ error: messageError }" role="status"><strong>{{ messageError ? 'Scan failed' : 'Status' }}</strong><span>{{ message }}</span><button aria-label="Dismiss message" @click="emit('dismissMessage')"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div><div class="review-main-toolbar"><p>{{ reviewView === 'changes' ? 'Browse every file diff. Use the file tree to jump to a file.' : 'View commits ahead of or behind the remote tracking branch.' }}</p><button class="button-primary" @click="scanBusy ? emit('cancelScan') : emit('scan')"><i :class="scanBusy ? 'bi bi-x-lg' : 'bi bi-arrow-clockwise'" aria-hidden="true"></i> {{ scanBusy ? 'Cancel scan' : 'Scan changes' }}</button></div>
       <div v-if="scanBusy" class="scan-progress" role="status"><i class="bi bi-arrow-clockwise icon-spin" aria-hidden="true"></i><div><strong>Scanning working tree</strong><p>{{ scanProgress || 'Preparing…' }}</p></div></div>
       <div v-else-if="reviews.length" class="review-body"><template v-if="record && data"><div class="review-summary"><div><span class="minor-heading">{{ date(record.createdAt) }} · {{ record.branch ?? 'detached' }}</span><h3>Working tree changes</h3></div><div class="counts"><span>{{ fileCountLabel(data.files.length) }}</span><b class="add">+{{ data.additions }}</b><b class="remove">−{{ data.deletions }}</b></div></div>
           <nav class="review-tabs" aria-label="Review content"><button type="button" :class="{ active: reviewView === 'changes' }" @click="emit('selectTab', 'changes')">Changes <span>{{ data.files.length }}</span></button><button type="button" :class="{ active: reviewView === 'commits' }" @click="emit('selectTab', 'commits')">Commits</button></nav>

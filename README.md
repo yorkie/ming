@@ -44,6 +44,12 @@ npm run build
 
 Serve the generated `dist/` directory from a static HTTP server configured to fall back to `index.html` for app URLs such as `/projects/` and `/settings/`. Vite produces a single HTML entry and separate JavaScript chunks for the Vue Router pages; project file and review views load when opened. The browser's directory-access requirements still apply.
 
+### GitHub Pages
+
+The [Pages workflow](.github/workflows/deploy-pages.yml) builds and deploys the site on pushes to `main`, or when started manually from GitHub Actions. In the repository's **Settings → Pages**, select **GitHub Actions** as the publishing source. The published URL for this repository is `https://yorkie.github.io/ming/`.
+
+The workflow builds with the `/ming/` base path and generates static entry files for `/projects/` and `/settings/`. These files all load the same Vue application; route components remain separate JavaScript chunks. A `404.html` copy lets other client-side routes render on GitHub Pages, although those fallback responses retain HTTP 404 status.
+
 ## Use it
 
 1. Click **Add project** and choose a Git repository root containing a `.git` directory. Ming requests read access to that folder.

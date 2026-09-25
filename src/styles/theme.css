@@ -374,6 +374,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .app-body .review-history > .minor-heading { padding: 14px 18px 10px; }
 .app-body .review-history .history-row { padding: 12px 17px; }
 .review-main { min-width: 0; margin-left: var(--review-sidebar-width); padding: 0 var(--page-gutter) 70px; }
+.review-main .review-notice { min-width: 0; margin-right: var(--directory-reserve); }
+.review-main .review-notice span { min-width: 0; flex: 1; }
+.review-main .review-notice button { flex: none; }
 .review-main-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 78px; padding-right: var(--directory-reserve); }
 .review-main-toolbar p { margin: 0; color: #59636e; font-size: 14px; }
 .review-main-toolbar .button-primary { flex: none; }
@@ -443,6 +446,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .reviews-layout { --review-sidebar-width: 190px; --directory-width: 220px; }
 }
 @media (max-width: 760px) {
+  .review-main .review-notice { margin-right: 0; }
   .review-main-toolbar { padding-right: 0; }
   .review-body .review-summary, .review-body .review-tabs { width: 100%; }
   .review-body .review-content-layout { display: flex; flex-direction: column-reverse; }
