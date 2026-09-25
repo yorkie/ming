@@ -188,7 +188,19 @@ async function scanProject() {
   try {
     const result = await scanInWorker(selected.directory, selected.settings.baseRef);
     gitInfo.value = result.gitInfo;
-    if (!result.data) return note('No changes between the working tree and comparison ref.');
+    if (!result.data) {
+      const currentId = activeReviewId.value;
+      if (currentId) {
+        await deleteReview(currentId);
+        reviews.value = reviews.value.filter(item => item.id !== currentId);
+        activeReviewId.value = null;
+        reviewData.value = null;
+        commitHistory.value = null;
+        commitsError.value = '';
+        await router.push(routeUrl(compactRoute({ kind: 'project', projectId: selected.id, page: 'reviews' })));
+      }
+      return note('No changes between the working tree and comparison ref.');
+    }
     const data = JSON.parse(result.data) as Review;
     if (!data.files.length) return note('No reviewable changes between the working tree and comparison ref.');
     const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(), branch: result.gitInfo.currentBranch, baseRef: result.baseRef, headOid: result.gitInfo.headOid, fileCount: data.files.length, data: result.data, snapshotHash: result.snapshotHash });
