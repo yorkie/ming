@@ -1,5 +1,7 @@
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+mod harness;
+pub use harness::{advance_task, review_snapshot_hash, start_task};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,7 @@ struct FileChange {
     path: String,
     old_path: String,
     status: &'static str,
+    binary_fingerprint: Option<String>,
     additions: usize,
     deletions: usize,
     hunks: Vec<Hunk>,
@@ -59,7 +62,7 @@ fn analyze(patch: &str) -> Review {
             finish_hunk(&mut current, &mut hunk);
             finish_file(&mut files, &mut current);
             if let Some((old, new)) = rest.split_once(" b/") {
-                current = Some(FileChange { path: new.into(), old_path: old.into(), status: "modified", additions: 0, deletions: 0, hunks: Vec::new() });
+                current = Some(FileChange { path: new.into(), old_path: old.into(), status: "modified", binary_fingerprint: None, additions: 0, deletions: 0, hunks: Vec::new() });
             }
             continue;
         }
@@ -69,6 +72,7 @@ fn analyze(patch: &str) -> Review {
         if line.starts_with("rename from ") { file.status = "renamed"; }
         if let Some(path) = line.strip_prefix("rename to ") { file.path = path.into(); }
         if line.starts_with("Binary files ") || line == "GIT binary patch" { file.status = "binary"; }
+        if let Some(fingerprint) = line.strip_prefix("Ming-Binary-Fingerprint: ") { file.binary_fingerprint = Some(fingerprint.into()); }
         if line.starts_with("@@ ") {
             finish_hunk(&mut current, &mut hunk);
             old_number = parse_range(line, '-').unwrap_or(0);
@@ -118,5 +122,11 @@ mod tests {
         assert_eq!(review.files[0].hunks[0].lines[1].old_number, Some(5));
         assert_eq!(review.files[0].hunks[0].lines[2].new_number, Some(5));
         assert_eq!(review.files[1].status, "added");
+    }
+    #[test]
+    fn preserves_binary_fingerprint() {
+        let review = analyze("diff --git a/image.png b/image.png\nMing-Binary-Fingerprint: old:new\nBinary files a/image.png and b/image.png differ\n");
+        assert_eq!(review.files[0].binary_fingerprint.as_deref(), Some("old:new"));
+        assert_eq!(review.files[0].status, "binary");
     }
 }

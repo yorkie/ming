@@ -12,7 +12,7 @@ function fsError(code: string, path: string): FsError {
 
 class BrowserRepositoryFs {
   private cache = new Map<string, FileSystemHandle>();
-  constructor(private root: FileSystemDirectoryHandle) { this.cache.set('/', root); }
+  constructor(private root: FileSystemDirectoryHandle, private onDirectory?: (path: string) => void) { this.cache.set('/', root); }
 
   private async handle(path: string): Promise<FileSystemHandle> {
     const parts = path.split('/').filter(part => part && part !== '.');
@@ -48,6 +48,7 @@ class BrowserRepositoryFs {
     readdir: async (path: string): Promise<string[]> => {
       const handle = await this.handle(path);
       if (handle.kind !== 'directory') throw fsError('ENOTDIR', path);
+      if (path !== '/.git' && !path.startsWith('/.git/')) this.onDirectory?.(path === '/' ? '.' : path.replace(/^\//, ''));
       const names: string[] = [];
       for await (const child of (handle as FileSystemDirectoryHandle).values()) names.push(child.name);
       return names;
@@ -119,6 +120,21 @@ export async function inspectRepository(root: FileSystemDirectoryHandle): Promis
     timestamp: commit.author.timestamp,
   })).catch(() => null) : null;
   return { currentBranch: currentBranch ?? null, branches, headOid, latestCommit };
+}
+
+export async function resolveComparisonRef(root: FileSystemDirectoryHandle, configuredRef: string, branch: string | null): Promise<string> {
+  if (configuredRef !== 'HEAD' || !branch) return configuredRef;
+  const fs = new BrowserRepositoryFs(root);
+  const gitFs = fs as unknown as Parameters<typeof git.getConfig>[0]['fs'];
+  const remote = await git.getConfig({ fs: gitFs, dir: '/', path: `branch.${branch}.remote` });
+  const merge = await git.getConfig({ fs: gitFs, dir: '/', path: `branch.${branch}.merge` });
+  const upstream = remote && remote !== '.' && merge?.startsWith('refs/heads/')
+    ? `${remote}/${merge.slice('refs/heads/'.length)}` : null;
+  const candidates = [...new Set([upstream, `origin/${branch}`].filter((ref): ref is string => !!ref))];
+  for (const candidate of candidates) {
+    if (await git.resolveRef({ fs: gitFs, dir: '/', ref: `refs/remotes/${candidate}` }).catch(() => null)) return candidate;
+  }
+  throw new Error(`No local remote-tracking ref for ${branch}. Fetch its remote branch, or choose a comparison ref in project settings.`);
 }
 
 export type CommitSummary = {
@@ -195,14 +211,24 @@ export async function readMarkdownSnapshot(root: FileSystemDirectoryHandle, ref:
 export async function readLocalRepository(root: FileSystemDirectoryHandle, ref = 'HEAD', onProgress?: (message: string) => void, onMarkdown?: (path: string, snapshot: MarkdownSnapshot) => void): Promise<string> {
   await validateGitRepository(root);
 
-  const fs = new BrowserRepositoryFs(root);
+  let scannedDirectories = 0;
+  let lastProgress = 0;
+  const fs = new BrowserRepositoryFs(root, path => {
+    scannedDirectories++;
+    if (scannedDirectories > 500) throw new Error(`Scan stopped after 500 directories near ${path}. Add generated or unrelated directories to .gitignore, then scan again.`);
+    const now = Date.now();
+    if (scannedDirectories === 1 || now - lastProgress >= 100) {
+      onProgress?.(`Scanning directory: ${path === '.' ? root.name : path} (${scannedDirectories} checked)…`);
+      lastProgress = now;
+    }
+  });
   const dir = '/';
   // BrowserRepositoryFs implements the read-only fs.promises methods isomorphic-git uses.
   const gitFs = fs as unknown as Parameters<typeof git.statusMatrix>[0]['fs'];
   const headOid = await git.resolveRef({ fs: gitFs, dir, ref }).catch(() => null);
   if (ref !== 'HEAD' && !headOid) throw new Error(`Comparison ref not found: ${ref}`);
   // isomorphic-git otherwise rewrites .git/index to refresh stat data.
-  const matrix = await git.statusMatrix({ fs: gitFs, dir, ref, refresh: false });
+  const matrix = await git.statusMatrix({ fs: gitFs, dir, ref, refresh: false, ignored: false });
   const changed = matrix.filter(([, head, workdir]) => head !== workdir);
   onProgress?.(`Found ${changed.length} changed files. Generating diffs…`);
   if (changed.length > 200) throw new Error(`This repository has ${changed.length} changed files. A scan can handle up to 200 files.`);
@@ -210,7 +236,7 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
   const patches: string[] = [];
 
   for (const [index, [path, head, workdir]] of changed.entries()) {
-    if (index > 0 && index % 10 === 0) onProgress?.(`Processed ${index} of ${changed.length} files…`);
+    onProgress?.(`Generating diff ${index + 1} of ${changed.length}: ${path}`);
     if (path.startsWith('.git/')) continue;
     let oldBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
     let newBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
@@ -234,7 +260,9 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
     }
     const header = `diff --git a/${path} b/${path}\n${!head ? 'new file mode 100644\n' : ''}${!workdir ? 'deleted file mode 100644\n' : ''}`;
     if (binary) {
-      patches.push(`${header}Binary files a/${path} and b/${path} differ\n`);
+      const fingerprint = async (bytes: Uint8Array<ArrayBufferLike>) =>
+        Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      patches.push(`${header}Ming-Binary-Fingerprint: ${await fingerprint(oldBytes)}:${await fingerprint(newBytes)}\nBinary files a/${path} and b/${path} differ\n`);
     } else {
       patches.push(header + createTwoFilesPatch(`a/${path}`, `b/${path}`, oldText, newText, '', '', { context: 3 }));
     }

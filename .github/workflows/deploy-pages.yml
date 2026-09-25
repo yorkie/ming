@@ -54,8 +54,9 @@ jobs:
 
       - name: Prepare direct links
         run: |
-          mkdir -p dist/projects dist/settings
+          mkdir -p dist/projects dist/console dist/settings
           cp dist/index.html dist/projects/index.html
+          cp dist/index.html dist/console/index.html
           cp dist/index.html dist/settings/index.html
           cp dist/index.html dist/404.html
           touch dist/.nojekyll

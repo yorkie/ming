@@ -29,6 +29,7 @@ const pickerOpen = ref(false);
 const picker = ref<HTMLElement | null>(null);
 const options = ref<HTMLButtonElement[]>([]);
 const categories: { id: GlobalSettingsSection; label: string; icon: string }[] = [
+  { id: 'usage', label: 'AI usage', icon: 'bar-chart' },
   { id: 'appearance', label: 'Appearance', icon: 'palette' },
   { id: 'files', label: 'File browsing', icon: 'folder2-open' },
   { id: 'reviews', label: 'Reviews', icon: 'file-earmark-diff' },
@@ -69,7 +70,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
     </header>
     <div class="app-body">
       <aside class="rail">
-        <div v-if="mode === 'settings'" class="rail-section"><div class="rail-heading"><span>Settings categories</span></div><nav class="project-nav" aria-label="Settings categories"><button v-for="category in categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ category.label }}</span></button></nav></div>
+        <div v-if="mode === 'settings'" class="rail-section"><div class="rail-heading"><span>Console sections</span></div><nav class="project-nav" aria-label="Console sections"><button v-for="category in categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ category.label }}</span></button></nav></div>
         <div v-else-if="activeProject" class="rail-section"><div class="rail-heading"><span>Project navigation</span></div><nav class="project-nav" aria-label="Project pages">
           <button type="button" :class="{ active: page === 'files' }" @click="emit('selectPage', 'files')"><i class="bi bi-folder2" aria-hidden="true"></i><span class="project-nav-text">Files</span></button>
           <button type="button" :class="{ active: page === 'reviews' }" @click="emit('selectPage', 'reviews')"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span class="project-nav-text">Reviews</span><span class="project-nav-count">{{ reviewCount ?? 0 }}</span></button>
@@ -77,7 +78,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
           <button type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">Settings</span></button>
         </nav></div>
         <div v-else class="rail-section"><div class="rail-heading"><span>Workspace</span></div><p class="rail-empty">Select a project above.</p></div>
-        <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" aria-label="Settings" title="Settings" @click="emit('globalSettings')"><i class="bi bi-gear" aria-hidden="true"></i><span>Settings</span></button></div>
+        <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" aria-label="MING Console" title="MING Console" @click="emit('globalSettings')"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>MING Console</span></button></div>
       </aside>
       <main class="workspace"><div class="page" :class="{ 'reviews-page': reviewLayout }"><slot /></div><slot name="toast" /></main>
     </div>

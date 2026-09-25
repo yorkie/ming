@@ -5,14 +5,11 @@ export type GlobalSettings = {
   showLineNumbers: boolean;
   showReadmePreview: boolean;
   filePreviewLimitKb: number;
-  defaultReviewTab: 'changes' | 'commits';
+  defaultReviewTab: 'topics' | 'changes' | 'commits';
   expandDiffs: boolean;
   richMarkdownByDefault: boolean;
-  copilotProvider: 'openai' | 'anthropic' | 'google' | 'custom';
-  copilotModel: string;
-  copilotEndpoint: string;
-  copilotRole: 'reviewer' | 'security' | 'maintainer' | 'custom';
-  copilotInstructions: string;
+  copilotModel: 'deepseek-flash' | 'deepseek-v4-pro';
+  copilotDeepSeekApiKey: string;
 };
 
 const STORAGE_KEY = 'ming-global-settings-v2';
@@ -22,9 +19,8 @@ export const defaultGlobalSettings: GlobalSettings = {
   codeFontSize: 13, codeLineHeight: 24,
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
-  defaultReviewTab: 'changes', expandDiffs: true, richMarkdownByDefault: false,
-  copilotProvider: 'openai', copilotModel: '', copilotEndpoint: '',
-  copilotRole: 'reviewer', copilotInstructions: '',
+  defaultReviewTab: 'topics', expandDiffs: true, richMarkdownByDefault: false,
+  copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '',
 };
 
 export function parseGlobalSettings(value: string | null): GlobalSettings {
@@ -43,14 +39,11 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
       showLineNumbers: flag(settings.showLineNumbers, true),
       showReadmePreview: flag(settings.showReadmePreview, true),
       filePreviewLimitKb: choice(settings.filePreviewLimitKb, [100, 500, 1000, 2000], defaultGlobalSettings.filePreviewLimitKb),
-      defaultReviewTab: choice(settings.defaultReviewTab, ['changes', 'commits'], defaultGlobalSettings.defaultReviewTab),
+      defaultReviewTab: choice(settings.defaultReviewTab, ['topics', 'changes', 'commits'], defaultGlobalSettings.defaultReviewTab),
       expandDiffs: flag(settings.expandDiffs, true),
       richMarkdownByDefault: flag(settings.richMarkdownByDefault, false),
-      copilotProvider: choice(settings.copilotProvider, ['openai', 'anthropic', 'google', 'custom'], defaultGlobalSettings.copilotProvider),
-      copilotModel: shortText(settings.copilotModel, 120),
-      copilotEndpoint: shortText(settings.copilotEndpoint, 500),
-      copilotRole: choice(settings.copilotRole, ['reviewer', 'security', 'maintainer', 'custom'], defaultGlobalSettings.copilotRole),
-      copilotInstructions: shortText(settings.copilotInstructions, 4000),
+      copilotModel: choice(settings.copilotModel, ['deepseek-flash', 'deepseek-v4-pro'], defaultGlobalSettings.copilotModel),
+      copilotDeepSeekApiKey: shortText(settings.copilotDeepSeekApiKey, 500),
     };
   } catch { return { ...defaultGlobalSettings }; }
 }

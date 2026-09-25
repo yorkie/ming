@@ -2,6 +2,14 @@ import MarkdownIt from 'markdown-it';
 import sanitizeHtml from 'sanitize-html';
 
 const documentMarkdown = new MarkdownIt({ html: true, linkify: false, maxNesting: 20 });
+const inlineMarkdown = new MarkdownIt({ html: false, linkify: false, maxNesting: 10 });
+
+export function renderMarkdownInline(source: string): string {
+  return sanitizeHtml(inlineMarkdown.renderInline(source), {
+    allowedTags: ['a', 'br', 'code', 'em', 's', 'strong'],
+    allowedAttributes: { a: ['href', 'title'] },
+  });
+}
 
 export function renderMarkdownDocument(source: string): string {
   const html = sanitizeHtml(documentMarkdown.render(source), {

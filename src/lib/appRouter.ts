@@ -5,7 +5,8 @@ export const router = createRouter({
   routes: [
     { path: '/', component: () => import('../pages/HomeApp.vue') },
     { path: '/projects/', alias: '/projects', component: () => import('../pages/ProjectApp.vue') },
-    { path: '/settings/', alias: '/settings', component: () => import('../pages/SettingsApp.vue') },
+    { path: '/console/', alias: '/console', component: () => import('../pages/SettingsApp.vue') },
+    { path: '/settings/', alias: '/settings', redirect: to => ({ path: '/console/', query: to.query }) },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 });

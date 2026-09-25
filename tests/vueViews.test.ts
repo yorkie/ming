@@ -10,6 +10,7 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
 try {
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
+  const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
   const filesHtml = await renderToString(createSSRApp(FilesView, {
     project, gitInfo: null, path: '', busy: false, error: '', settings: defaultGlobalSettings,
@@ -23,11 +24,21 @@ try {
   const record: ReviewRecord = { id: 'review-1', projectId: project.id, createdAt: 1, branch: 'main', baseRef: 'HEAD', data: JSON.stringify(data) };
   const reviewsHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [record], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
-    scanBusy: false, scanProgress: '', commitHistory: null, commitsBusy: false, commitsError: '',
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
   }));
   assert.match(reviewsHtml, /src\/main\.ts/);
   assert.match(reviewsHtml, /const/);
   assert.match(reviewsHtml, /Changed files/);
+  const topicRecord: ReviewRecord = { ...record, aiReview: { createdAt: 2, reviewed: {}, artifact: {
+    schemaVersion: 1, snapshotHash: 'sample', model: 'deepseek-flash',
+    topics: [{ id: 'topic-1', title: 'Update main', summary: 'Changes the main value.', checks: ['Check callers.'], unitIds: ['f0h0'] }],
+  } } };
+  const topicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: topicRecord, data, settings: defaultGlobalSettings }));
+  assert.match(topicHtml, /Update main/);
+  assert.match(topicHtml, /code-source/);
+  assert.match(topicHtml, /value/);
+  assert.match(topicHtml, /Mark reviewed/);
   console.log('Vue view rendering test passed');
 } finally {
   await server.close();

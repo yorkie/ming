@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { renderMarkdownRichDiff } from '../src/lib/markdownRichDiff';
-import { renderMarkdownDocument } from '../src/lib/markdownDocument';
+import { renderMarkdownDocument, renderMarkdownInline } from '../src/lib/markdownDocument';
 
 const rich = renderMarkdownRichDiff({
   before: '# Guide\n\nOld paragraph.\n',
@@ -18,4 +18,6 @@ assert.match(document, /<div align="center">/);
 assert.match(document, /<img[^>]+data-project-src="\.\/logo\.png"/);
 assert.match(document, /<table>/);
 assert.doesNotMatch(renderMarkdownDocument('<script>alert(1)</script><a href="javascript:alert(1)">bad</a>'), /<script|href="javascript:/);
+assert.match(renderMarkdownInline('Check `npm run build` and **routing**.'), /<code>npm run build<\/code>.*<strong>routing<\/strong>/);
+assert.doesNotMatch(renderMarkdownInline('<img src="https://example.com/x" onerror="alert(1)"> [bad](javascript:alert(1))'), /<img|href="javascript:/);
 console.log('Markdown rich diff test passed');

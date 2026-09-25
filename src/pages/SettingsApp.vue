@@ -7,12 +7,13 @@ import { parseRoute, routeUrl, type GlobalSettingsSection } from '../lib/routes'
 import AppShell from '../components/AppShell.vue';
 import ChoiceSelect from '../components/ChoiceSelect.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
+import AiUsageView from '../components/AiUsageView.vue';
 import { addLocalProject } from '../lib/addProject';
 
 const router = useRouter();
 const currentRoute = useRoute();
 const initialRoute = parseRoute(currentRoute.fullPath);
-const section = ref<GlobalSettingsSection>(initialRoute?.kind === 'global-settings' ? initialRoute.section ?? 'appearance' : 'appearance');
+const section = ref<GlobalSettingsSection>(initialRoute?.kind === 'global-settings' ? initialRoute.section ?? 'usage' : 'usage');
 const draft = ref(loadGlobalSettings());
 const projects = shallowRef<Project[]>([]);
 const ready = ref(false);
@@ -21,9 +22,8 @@ const messageError = ref(false);
 const fontSizes = [12, 13, 14, 15, 16].map(value => ({ value: String(value), label: `${value} px` }));
 const lineHeights = [20, 24, 28, 32].map(value => ({ value: String(value), label: `${value} px` }));
 const previewLimits = [['100', '100 KB'], ['500', '500 KB'], ['1000', '1 MB'], ['2000', '2 MB']].map(([value, label]) => ({ value, label }));
-const reviewTabs = [{ value: 'changes', label: 'Changes' }, { value: 'commits', label: 'Commits' }];
-const providers = [{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'google', label: 'Google' }, { value: 'custom', label: 'Custom endpoint' }];
-const roles = [{ value: 'reviewer', label: 'Code reviewer' }, { value: 'security', label: 'Security reviewer' }, { value: 'maintainer', label: 'Maintainer' }, { value: 'custom', label: 'Custom role' }];
+const reviewTabs = [{ value: 'topics', label: 'Topics' }, { value: 'changes', label: 'Changes' }, { value: 'commits', label: 'Commits' }];
+const deepSeekModels = [{ value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }];
 function note(value: string, error = false) { message.value = value; messageError.value = error; }
 function openHome() { void router.push(routeUrl({ kind: 'home' })); }
 function openProject(id: string | null) { void router.push(id ? routeUrl({ kind: 'project', projectId: id, page: 'files' }) : routeUrl({ kind: 'home' })); }
@@ -35,13 +35,13 @@ function selectSection(next: GlobalSettingsSection) {
 }
 watch(() => currentRoute.fullPath, value => {
   const route = parseRoute(value);
-  if (route?.kind === 'global-settings') section.value = route.section ?? 'appearance';
+  if (route?.kind === 'global-settings') section.value = route.section ?? 'usage';
 });
 function save() {
   try {
     saveGlobalSettings(draft.value);
     draft.value = loadGlobalSettings();
-    note(section.value === 'copilot' ? 'Copilot preferences saved. AI review is not connected yet.' : 'Settings saved in this browser.');
+    note('Settings saved in this browser.');
   } catch (error) { note(error instanceof Error ? error.message : String(error), true); }
 }
 async function addProject() {
@@ -56,13 +56,14 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell v-if="ready" :projects="projects" mode="settings" :section="section" @home="openHome" @add-project="addProject" @select-project="openProject" @select-section="selectSection" @global-settings="selectSection('appearance')">
+  <AppShell v-if="ready" :projects="projects" mode="settings" :section="section" @home="openHome" @add-project="addProject" @select-project="openProject" @select-section="selectSection" @global-settings="selectSection('usage')">
     <div class="global-settings-page">
-      <div class="section-intro"><div><span class="section-index">SETTINGS</span><h2>Settings</h2></div><p>These preferences apply to every project in this browser.</p></div>
-      <form class="global-settings-form" @submit.prevent="save">
+      <div class="section-intro"><div><span class="section-index">MING / CONSOLE</span><h2>MING Console</h2></div><p>{{ section === 'usage' ? 'Track AI usage across projects in this browser.' : 'Manage preferences that apply to every project in this browser.' }}</p></div>
+      <AiUsageView v-if="section === 'usage'" :projects="projects" />
+      <form v-else class="global-settings-form" @submit.prevent="save">
         <section class="global-settings-section"><div class="global-settings-section-heading">
           <h3>{{ { appearance: 'Appearance', files: 'File browsing', reviews: 'Reviews', copilot: 'Copilot' }[section] }}</h3>
-          <p>{{ { appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Prepare AI review preferences. Copilot is not connected yet, so these settings do not run a review.' }[section] }}</p>
+          <p>{{ { appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Configure DeepSeek for AI-assisted topic reviews.' }[section] }}</p>
         </div>
           <template v-if="section === 'appearance'">
             <div class="setting-row"><label><strong>Code font size</strong><span>Applies to file previews and diff lines</span></label><ChoiceSelect :model-value="String(draft.codeFontSize)" :options="fontSizes" label="Code font size" @update:model-value="draft.codeFontSize = Number($event)" /></div>
@@ -75,16 +76,13 @@ onMounted(async () => {
             <div class="setting-row"><label><strong>Text preview limit</strong><span>Files above this size are not loaded into the preview</span></label><ChoiceSelect :model-value="String(draft.filePreviewLimitKb)" :options="previewLimits" label="Text preview limit" @update:model-value="draft.filePreviewLimitKb = Number($event)" /></div>
           </template>
           <template v-else-if="section === 'reviews'">
-            <div class="setting-row"><label><strong>Default tab</strong><span>Tab shown when opening a review</span></label><ChoiceSelect :model-value="draft.defaultReviewTab" :options="reviewTabs" label="Default tab" @update:model-value="draft.defaultReviewTab = $event as 'changes' | 'commits'" /></div>
+            <div class="setting-row"><label><strong>Default tab</strong><span>Tab shown after scanning changes</span></label><ChoiceSelect :model-value="draft.defaultReviewTab" :options="reviewTabs" label="Default tab" @update:model-value="draft.defaultReviewTab = $event as typeof draft.defaultReviewTab" /></div>
             <div class="setting-row"><label><strong>Expand file diffs</strong><span>Open changed files when a review is selected</span></label><ToggleSwitch v-model="draft.expandDiffs" label="Expand file diffs" /></div>
             <div class="setting-row"><label><strong>Rich Markdown diff</strong><span>Open Markdown changes in rendered view when available</span></label><ToggleSwitch v-model="draft.richMarkdownByDefault" label="Rich Markdown diff" /></div>
           </template>
           <template v-else>
-            <div class="setting-row"><label><strong>LLM provider</strong><span>Provider to use when Copilot is available</span></label><ChoiceSelect :model-value="draft.copilotProvider" :options="providers" label="LLM provider" @update:model-value="draft.copilotProvider = $event as typeof draft.copilotProvider" /></div>
-            <div class="setting-row"><label for="copilot-model"><strong>Model</strong><span>Provider model identifier</span></label><input id="copilot-model" v-model="draft.copilotModel" type="text" placeholder="Model name" maxlength="120"></div>
-            <div class="setting-row"><label for="copilot-endpoint"><strong>Custom endpoint</strong><span>Optional API base URL for a custom provider</span></label><input id="copilot-endpoint" v-model="draft.copilotEndpoint" type="text" placeholder="https://example.com/v1" maxlength="500"></div>
-            <div class="setting-row"><label><strong>Review role</strong><span>Perspective for future AI reviews</span></label><ChoiceSelect :model-value="draft.copilotRole" :options="roles" label="Review role" @update:model-value="draft.copilotRole = $event as typeof draft.copilotRole" /></div>
-            <div class="setting-row setting-row-textarea"><label for="copilot-instructions"><strong>Review instructions</strong><span>Additional guidance for your Copilot role</span></label><textarea id="copilot-instructions" v-model="draft.copilotInstructions" maxlength="4000" rows="5" placeholder="Focus on correctness, risks, and actionable feedback…"></textarea></div>
+            <div class="setting-row"><label for="copilot-deepseek-key"><strong>DeepSeek API key</strong><span>Saved in this browser with your Copilot settings</span></label><input id="copilot-deepseek-key" v-model="draft.copilotDeepSeekApiKey" type="password" autocomplete="off" placeholder="Enter DeepSeek API key" maxlength="500"></div>
+            <div v-if="draft.copilotDeepSeekApiKey.trim()" class="setting-row"><label><strong>Model</strong><span>DeepSeek model for AI topic reviews</span></label><ChoiceSelect :model-value="draft.copilotModel" :options="deepSeekModels" label="DeepSeek model" @update:model-value="draft.copilotModel = $event as typeof draft.copilotModel" /></div>
           </template>
         </section>
         <div class="global-settings-actions"><button type="submit" class="button-primary">Save settings</button></div>

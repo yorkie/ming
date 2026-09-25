@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { inspectRepository, readCommitHistory, readLocalRepository, readMarkdownSnapshot, validateGitRepository } from '../src/lib/localRepository';
+import { inspectRepository, readCommitHistory, readLocalRepository, readMarkdownSnapshot, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
 
 function directory(path: string): FileSystemDirectoryHandle {
   return {
@@ -61,11 +61,27 @@ try {
   assert.equal(info.headOid, baselineOid);
   assert.equal(info.latestCommit?.oid, baselineOid);
   assert.equal(info.latestCommit?.title, 'baseline');
+  await assert.rejects(resolveComparisonRef(directory(root), 'HEAD', info.currentBranch), /No local remote-tracking ref/);
+  assert.equal(await resolveComparisonRef(directory(root), 'HEAD', null), 'HEAD');
+  assert.equal(await resolveComparisonRef(directory(root), 'some-ref', info.currentBranch), 'some-ref');
+  await writeFile(join(root, '.gitignore'), 'dist/\n*.log\n');
+  await mkdir(join(root, 'dist'));
+  await writeFile(join(root, 'dist', 'bundle.js'), 'ignored\n');
+  await writeFile(join(root, 'debug.log'), 'ignored\n');
+  await mkdir(join(root, 'src'));
+  await writeFile(join(root, 'src', '.gitignore'), '*.tmp\n');
+  await writeFile(join(root, 'src', 'scratch.tmp'), 'ignored\n');
+  await writeFile(join(root, 'src', 'kept.ts'), 'included\n');
   await writeFile(join(root, 'tracked.txt'), 'after\n');
   await writeFile(join(root, 'new.txt'), 'untracked\n');
   await writeFile(join(root, 'new.md'), '# New guide\n');
   const markdown: Record<string, { before: string; after: string }> = {};
-  const patch = await readLocalRepository(directory(root), 'HEAD', undefined, (path, snapshot) => { markdown[path] = snapshot; });
+  const progress: string[] = [];
+  const patch = await readLocalRepository(directory(root), 'HEAD', message => progress.push(message), (path, snapshot) => { markdown[path] = snapshot; });
+  assert.ok(progress.some(message => message.startsWith('Scanning directory:')));
+  assert.ok(progress.some(message => message.includes('Generating diff')));
+  assert.match(patch, /diff --git a\/src\/kept\.ts b\/src\/kept\.ts/);
+  assert.doesNotMatch(patch, /dist\/bundle\.js|debug\.log|src\/scratch\.tmp/);
   assert.match(patch, /diff --git a\/tracked\.txt b\/tracked\.txt/);
   assert.match(patch, /-before/);
   assert.match(patch, /\+after/);
@@ -91,6 +107,10 @@ try {
   run('update-ref', `refs/remotes/origin/${branch}`, remoteOid);
   run('config', `branch.${branch}.remote`, 'origin');
   run('config', `branch.${branch}.merge`, `refs/heads/${branch}`);
+  assert.equal(await resolveComparisonRef(directory(root), 'HEAD', branch), `origin/${branch}`);
+  const remotePatch = await readLocalRepository(directory(root), await resolveComparisonRef(directory(root), 'HEAD', branch));
+  assert.match(remotePatch, /-remote/);
+  assert.match(remotePatch, /\+after/);
   const history = await readCommitHistory(directory(root), localOid, branch);
   assert.equal(history.remoteRef, `origin/${branch}`);
   assert.deepEqual(history.localOnly.map(commit => commit.title), ['local change']);

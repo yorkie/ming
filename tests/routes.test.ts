@@ -4,6 +4,7 @@ import { parseRoute, resolveId, routeUrl, shortId, type Route } from '../src/lib
 const routes: Route[] = [
   { kind: 'home' },
   { kind: 'global-settings' },
+  { kind: 'global-settings', section: 'usage' },
   { kind: 'global-settings', section: 'appearance' },
   { kind: 'global-settings', section: 'files' },
   { kind: 'global-settings', section: 'reviews' },
@@ -18,14 +19,16 @@ const routes: Route[] = [
 ];
 for (const route of routes) assert.deepEqual(parseRoute(routeUrl(route)), route);
 assert.deepEqual(parseRoute(''), { kind: 'home' });
+assert.equal(routeUrl({ kind: 'global-settings' }), '/console/');
+assert.deepEqual(parseRoute('/console/'), { kind: 'global-settings' });
 assert.deepEqual(parseRoute('/settings/'), { kind: 'global-settings' });
 assert.deepEqual(parseRoute('/projects/?id=project-1'), { kind: 'project', projectId: 'project-1', page: 'files' });
-assert.equal(parseRoute('/settings/?section=unknown'), null);
+assert.equal(parseRoute('/console/?section=unknown'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=unknown'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=files&review=review-1'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=reviews&review=review-1&tab=unknown'), null);
 assert.equal(parseRoute('#/projects/project-1'), null);
-assert.equal(routeUrl(routes[8]).includes('#'), false);
+assert.equal(routeUrl(routes[9]).includes('#'), false);
 const ids = ['12345678-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '12345678-bbbb-bbbb-bbbb-bbbbbbbbbbbb'];
 assert.equal(shortId(ids[0], ids), '12345678-a');
 assert.equal(resolveId('12345678-a', ids), ids[0]);
