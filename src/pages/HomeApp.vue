@@ -13,7 +13,7 @@ const ready = ref(false);
 const message = ref('');
 const messageError = ref(false);
 function note(value: string, error = false) { message.value = value; messageError.value = error; }
-function openProject(id: string | null) { if (id) void router.push(routeUrl({ kind: 'project', projectId: id, page: 'files' })); }
+function openProject(id: string | null, page: 'files' | 'reviews' = 'files') { if (id) void router.push(routeUrl({ kind: 'project', projectId: id, page })); }
 function openSettings() { void router.push(routeUrl({ kind: 'global-settings' })); }
 async function addProject() {
   try { const project = await addLocalProject(projects.value); openProject(project.id); }
@@ -27,9 +27,26 @@ onMounted(async () => {
 </script>
 <template>
   <AppShell v-if="ready" :projects="projects" mode="home" @home="() => {}" @add-project="addProject" @select-project="openProject" @global-settings="openSettings">
-    <div class="projects-page"><div class="projects-header"><div><h1>{{ t('Projects') }}</h1><p>{{ projects.length ? language === 'zh-CN' ? `${projects.length} 个本地仓库` : `${projects.length} local ${projects.length === 1 ? 'repository' : 'repositories'}` : t('Add a local Git repository to browse files and review changes.') }}</p></div><button class="button-primary" @click="addProject"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button></div>
-      <section v-if="projects.length" class="project-list-panel" :aria-label="t('Local projects')"><button v-for="project in projects" :key="project.id" type="button" class="project-list-row" @click="openProject(project.id)"><span class="project-list-icon"><i class="bi bi-folder2" aria-hidden="true"></i></span><strong class="project-list-name">{{ project.name }}</strong><i class="bi bi-chevron-right" aria-hidden="true"></i></button></section>
-      <div v-else class="projects-empty"><i class="bi bi-folder2-open" aria-hidden="true"></i><h2>{{ t('No projects yet') }}</h2><p>{{ t('Choose a local Git repository to get started.') }}</p><button class="button-outline" @click="addProject">{{ t('Choose folder') }}</button></div>
+    <div class="projects-page home-page">
+      <section class="home-hero">
+        <div class="home-eyebrow">{{ t('WELCOME TO MING') }}</div>
+        <h1>{{ t('Review AI-written code with confidence.') }}</h1>
+        <p>{{ t('Ming turns local Git changes into a review you can follow. Inspect the real diff, group related changes into topics, and decide what needs another look.') }}</p>
+        <div class="home-hero-actions"><button class="button-primary" @click="addProject"><i class="bi bi-plus-lg" aria-hidden="true"></i> {{ t('Add a local repository') }}</button><span>{{ t('Runs in your browser. Your repository stays on your computer.') }}</span></div>
+      </section>
+      <section class="home-guide" :aria-label="t('Get started')">
+        <div class="home-section-heading"><div><span class="home-eyebrow">{{ t('GET STARTED') }}</span><h2>{{ t('Your first review in three steps') }}</h2></div></div>
+        <div class="home-steps">
+          <article><span class="home-step-number">01</span><i class="bi bi-folder2-open" aria-hidden="true"></i><h3>{{ t('Choose your repository') }}</h3><p>{{ t('Select a local Git folder and grant read access. No upload or GitHub sign-in is needed.') }}</p></article>
+          <article><span class="home-step-number">02</span><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><h3>{{ t('Inspect the changes') }}</h3><p>{{ t('Open Reviews to compare your working tree with a Git ref. Ming keeps the review current while this page is open.') }}</p></article>
+          <article><span class="home-step-number">03</span><i class="bi bi-check2-square" aria-hidden="true"></i><h3>{{ t('Review by topic') }}</h3><p>{{ t('Add a DeepSeek key in MING Console when you want AI topics. Check each topic against its diff and mark your decision.') }}</p></article>
+        </div>
+      </section>
+      <section class="home-projects" :aria-label="t('Local projects')">
+        <div class="home-section-heading"><div><span class="home-eyebrow">{{ t('YOUR WORKSPACE') }}</span><h2>{{ t('Local projects') }}</h2><p>{{ projects.length ? language === 'zh-CN' ? `${projects.length} 个本地仓库` : `${projects.length} local ${projects.length === 1 ? 'repository' : 'repositories'}` : t('Add a repository to begin your first review.') }}</p></div><button v-if="projects.length" class="button-outline" @click="addProject"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button></div>
+        <div v-if="projects.length" class="home-project-grid"><article v-for="project in projects" :key="project.id" class="home-project-card"><div class="home-project-icon"><i class="bi bi-folder2" aria-hidden="true"></i></div><h3>{{ project.name }}</h3><p>{{ t('Local Git repository') }}</p><div class="home-project-actions"><button class="button-primary" @click="openProject(project.id, 'reviews')">{{ t('Open reviews') }} <i class="bi bi-arrow-right" aria-hidden="true"></i></button><button class="button-outline" @click="openProject(project.id)">{{ t('Browse files') }}</button></div></article></div>
+        <div v-else class="home-empty"><i class="bi bi-folder-plus" aria-hidden="true"></i><div><h3>{{ t('Ready when you are') }}</h3><p>{{ t('Choose a local repository to start reviewing its changes.') }}</p></div><button class="button-outline" @click="addProject">{{ t('Choose folder') }}</button></div>
+      </section>
     </div>
     <template #toast><div v-if="message" class="toast" :class="{ error: messageError }" role="status">{{ message }}<button aria-label="Dismiss message" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>
   </AppShell>
