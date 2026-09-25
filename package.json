@@ -1,0 +1,37 @@
+{
+  "name": "ming",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:wasm": "wasm-pack build crates/ming-core --target web --out-dir ../../src/wasm --release",
+    "build": "npm run build:wasm && vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "cargo test --manifest-path crates/ming-core/Cargo.toml && vue-tsc --noEmit && node --import tsx tests/localRepository.test.ts && node --import tsx tests/projectFiles.test.ts && node --import tsx tests/projectStore.test.ts && node --import tsx tests/globalSettings.test.ts && node --import tsx tests/reviewTree.test.ts && node --import tsx tests/routes.test.ts && node --import tsx tests/syntaxHighlight.test.ts && node --import tsx tests/markdownRichDiff.test.ts && node --import tsx tests/vueViews.test.ts"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/markdown-it": "^14.2.0",
+    "@types/prismjs": "^1.26.6",
+    "@types/sanitize-html": "^2.16.1",
+    "@types/wicg-file-system-access": "^2023.10.7",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0",
+    "vue-tsc": "^3.3.11"
+  },
+  "dependencies": {
+    "bootstrap-icons": "^1.13.1",
+    "buffer": "^6.0.3",
+    "diff": "^9.0.0",
+    "isomorphic-git": "^1.42.2",
+    "markdown-it": "^15.0.2",
+    "prismjs": "^1.30.0",
+    "sanitize-html": "^2.17.7",
+    "vue": "^3.5.43",
+    "vue-router": "^4.6.4"
+  }
+}
