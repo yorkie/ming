@@ -7,6 +7,7 @@ export type GlobalSettings = {
   showReadmePreview: boolean;
   filePreviewLimitKb: number;
   defaultReviewTab: 'topics' | 'changes' | 'commits';
+  autoGenerateTopics: boolean;
   expandDiffs: boolean;
   richMarkdownByDefault: boolean;
   copilotModel: 'deepseek-flash' | 'deepseek-v4-pro';
@@ -23,7 +24,7 @@ export const defaultGlobalSettings: GlobalSettings = {
   codeFontSize: 13, codeLineHeight: 24,
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
-  defaultReviewTab: 'topics', expandDiffs: true, richMarkdownByDefault: false,
+  defaultReviewTab: 'topics', autoGenerateTopics: true, expandDiffs: true, richMarkdownByDefault: false,
   copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '', copilotSummaryLanguage: 'en', copilotReviewLanguage: 'en',
 };
 
@@ -45,6 +46,7 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
       showReadmePreview: flag(settings.showReadmePreview, true),
       filePreviewLimitKb: choice(settings.filePreviewLimitKb, [100, 500, 1000, 2000], defaultGlobalSettings.filePreviewLimitKb),
       defaultReviewTab: choice(settings.defaultReviewTab, ['topics', 'changes', 'commits'], defaultGlobalSettings.defaultReviewTab),
+      autoGenerateTopics: flag(settings.autoGenerateTopics, true),
       expandDiffs: flag(settings.expandDiffs, true),
       richMarkdownByDefault: flag(settings.richMarkdownByDefault, false),
       copilotModel: choice(settings.copilotModel, ['deepseek-flash', 'deepseek-v4-pro'], defaultGlobalSettings.copilotModel),

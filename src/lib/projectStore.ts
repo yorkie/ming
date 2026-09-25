@@ -82,8 +82,34 @@ export async function rememberProject(project: Project): Promise<void> {
   await requestInStore('projects', 'readwrite', store => store.put(project));
 }
 export async function listReviews(projectId: string): Promise<ReviewRecord[]> {
-  return (await requestInStore<ReviewRecord[]>('reviews', 'readonly', store => store.index('projectId').getAll(projectId)))
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    const request = store.index('projectId').getAll(projectId);
+    let reviews: ReviewRecord[] = [];
+    request.onsuccess = () => {
+      const sorted = request.result.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+      const pairs = new Map<string, ReviewRecord>();
+      for (const review of sorted) {
+        const key = JSON.stringify([review.branch, review.baseRef]);
+        const latest = pairs.get(key);
+        if (!latest) { pairs.set(key, review); continue; }
+        if (!latest.aiReview && review.aiReview && sameSnapshot(latest, review)) {
+          latest.aiReview = review.aiReview;
+          store.put(latest);
+        }
+        store.delete(review.id);
+      }
+      reviews = [...pairs.values()];
+    };
+    tx.oncomplete = () => { db.close(); resolve(reviews); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+function sameSnapshot(a: ReviewRecord, b: ReviewRecord): boolean {
+  return a.snapshotHash && b.snapshotHash ? a.snapshotHash === b.snapshotHash : a.data === b.data;
 }
 export async function rememberReview(review: ReviewRecord): Promise<void> {
   await requestInStore('reviews', 'readwrite', store => store.put(review));
@@ -107,10 +133,11 @@ export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRe
     let saved = review;
     request.onsuccess = () => {
       const matches = request.result
-        .filter(item => item.branch === review.branch && item.baseRef === review.baseRef &&
-          (item.snapshotHash && review.snapshotHash ? item.snapshotHash === review.snapshotHash : item.data === review.data))
-        .sort((a, b) => b.createdAt - a.createdAt);
-      saved = { ...review, id: matches[0]?.id ?? review.id, aiReview: matches[0]?.aiReview };
+        .filter(item => item.branch === review.branch && item.baseRef === review.baseRef)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+      const matchingTopics = matches.find(item => item.aiReview && sameSnapshot(item, review));
+      saved = { ...review, id: matches[0]?.id ?? review.id,
+        aiReview: matchingTopics?.aiReview };
       for (const duplicate of matches.slice(1)) store.delete(duplicate.id);
       store.put(saved);
     };

@@ -31,6 +31,7 @@ try {
   assert.match(reviewsHtml, /src\/main\.ts/);
   assert.match(reviewsHtml, /const/);
   assert.match(reviewsHtml, /Changed files/);
+  assert.match(reviewsHtml, /Review pairs/);
   const topicRecord: ReviewRecord = { ...record, aiReview: { createdAt: 2, reviewed: {}, artifact: {
     schemaVersion: 1, snapshotHash: 'sample', model: 'deepseek-flash',
     topics: [{ id: 'topic-1', title: 'Update main', summary: 'Changes the main value.', checks: ['Check callers.'], unitIds: ['f0h0'] }],
@@ -49,6 +50,7 @@ try {
     commitHistory: null, commitsBusy: false, commitsError: '',
   }));
   assert.match(chineseReviewsHtml, /改动文件/);
+  assert.match(chineseReviewsHtml, /分支评审/);
   setLanguage('en');
   console.log('Vue view rendering test passed');
 } finally {

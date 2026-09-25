@@ -55,6 +55,7 @@ let requestAccessOnNextRoute = false;
 let cancelCommitLoad: (() => void) | null = null;
 let cancelActiveScan: (() => void) | null = null;
 let cancelAiReview: (() => void) | null = null;
+let pendingAutoReviewId: string | null = null;
 
 function note(value: string, error = false) { message.value = t(value); messageError.value = error; }
 function compactRoute(route: Route): Route {
@@ -82,6 +83,7 @@ async function applyRoute(requestAccess = false) {
   cancelCommitLoad?.();
   commitsBusy.value = false;
   const route = parseRoute(currentRoute.fullPath);
+  if (pendingAutoReviewId && (route?.kind !== 'review' || !pendingAutoReviewId.startsWith(route.reviewId))) pendingAutoReviewId = null;
   if (route?.kind === 'home' || route?.kind === 'global-settings') { void router.replace(routeUrl(route)); return; }
   if (!route) { note('Unrecognized page URL.', true); ready.value = true; return; }
   const id = resolveId(route.projectId, projects.value.map(item => item.id));
@@ -135,6 +137,10 @@ async function applyRoute(requestAccess = false) {
     const loadFiles = view.value === 'files' && (fileView.value?.projectId !== selected.id || fileView.value.path !== filePath.value);
     if (loadFiles) { filesBusy.value = true; filesError.value = ''; }
     ready.value = true;
+    if (nextReviewId && pendingAutoReviewId === nextReviewId) {
+      pendingAutoReviewId = null;
+      void generateAiReview();
+    }
     if (route.kind === 'review' && route.page === 'commits' && !commitHistory.value) loadCommits();
     if (loadFiles) {
       try {
@@ -192,36 +198,46 @@ async function scanProject() {
     const result = await scanInWorker(selected.directory, selected.settings.baseRef);
     gitInfo.value = result.gitInfo;
     if (!result.data) {
-      const currentId = activeReviewId.value;
-      if (currentId) {
-        await deleteReview(currentId);
-        reviews.value = reviews.value.filter(item => item.id !== currentId);
-        activeReviewId.value = null;
-        reviewData.value = null;
-        commitHistory.value = null;
-        commitsError.value = '';
-        await router.push(routeUrl(compactRoute({ kind: 'project', projectId: selected.id, page: 'reviews' })));
-      }
+      await clearComparedReview(selected.id, result.gitInfo.currentBranch, result.baseRef);
       return note('No changes between the working tree and comparison ref.');
     }
     const data = JSON.parse(result.data) as Review;
-    if (!data.files.length) return note('No reviewable changes between the working tree and comparison ref.');
+    if (!data.files.length) {
+      await clearComparedReview(selected.id, result.gitInfo.currentBranch, result.baseRef);
+      return note('No reviewable changes between the working tree and comparison ref.');
+    }
     const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(), branch: result.gitInfo.currentBranch, baseRef: result.baseRef, headOid: result.gitInfo.headOid, fileCount: data.files.length, data: result.data, snapshotHash: result.snapshotHash });
     reviews.value = await listReviews(selected.id);
     reviewData.value = data;
     activeReviewId.value = saved.id;
     commitHistory.value = null; commitsError.value = '';
-    navigate({ kind: 'review', projectId: selected.id, reviewId: saved.id, page: settings.defaultReviewTab });
+    const latestSettings = loadGlobalSettings();
+    const generateTopics = latestSettings.autoGenerateTopics && !!latestSettings.copilotDeepSeekApiKey.trim();
+    pendingAutoReviewId = generateTopics ? saved.id : null;
+    scanBusy.value = false;
+    navigate({ kind: 'review', projectId: selected.id, reviewId: saved.id, page: generateTopics ? 'topics' : latestSettings.defaultReviewTab });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') note('Scan canceled.');
     else note(`Scan failed: ${error instanceof Error ? error.message : String(error)}`, true);
   } finally { scanBusy.value = false; }
 }
+async function clearComparedReview(projectId: string, branch: string | null, baseRef: string) {
+  const matching = reviews.value.find(item => item.branch === branch && item.baseRef === baseRef);
+  if (!matching) return;
+  await deleteReview(matching.id);
+  reviews.value = reviews.value.filter(item => item.id !== matching.id);
+  if (activeReviewId.value !== matching.id) return;
+  activeReviewId.value = null;
+  reviewData.value = null;
+  commitHistory.value = null;
+  commitsError.value = '';
+  await router.push(routeUrl(compactRoute({ kind: 'project', projectId, page: 'reviews' })));
+}
 async function deleteSelectedReview() {
   const selected = record.value;
   const currentProject = project.value;
   if (!selected || !currentProject || scanBusy.value || aiBusy.value) return;
-  if (!window.confirm(t('Delete this review record and its topic review status from this browser?'))) return;
+  if (!window.confirm(t('Delete this branch review and its topic status from this browser?'))) return;
   try {
     await deleteReview(selected.id);
     reviews.value = reviews.value.filter(item => item.id !== selected.id);
@@ -327,7 +343,7 @@ onUnmounted(() => { cancelCommitLoad?.(); cancelActiveScan?.(); cancelAiReview?.
     <div v-if="!project" class="empty-state"><h3>Project not found</h3><p>Select a project from the Projects page.</p><button class="button-outline" @click="navigate({ kind: 'home' })">Projects</button></div>
     <div v-else-if="permissionRequired" class="empty-state"><h3>Project access required</h3><p>Grant read access to open this project. Ming will not modify its files.</p><button class="button-primary" @click="applyRoute(true)">Grant access</button></div>
     <FilesView v-else-if="view === 'files'" :project="project" :git-info="gitInfo" :path="filePath" :data="fileView?.data ?? null" :busy="filesBusy" :error="filesError" :settings="settings" @navigate="selectFilePath" @refresh="refreshFiles" />
-    <ReviewsView v-else-if="view === 'reviews'" :key="activeReviewId ?? 'empty'" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
+    <ReviewsView v-else-if="view === 'reviews'" :key="`${activeReviewId ?? 'empty'}:${record?.createdAt ?? ''}`" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
     <BranchesView v-else-if="view === 'branches'" :git-info="gitInfo" />
     <ProjectSettingsView v-else :project="project" :git-info="gitInfo" @save="saveProjectSettings" @remove="removeProject" />
     <template #toast><div v-if="!project && message" class="toast" :class="{ error: messageError }" role="status">{{ message }}<button aria-label="Dismiss message" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>

@@ -16,4 +16,6 @@ assert.deepEqual(parseGlobalSettings('{"language":"zh-CN","copilotSummaryLanguag
   ...defaultGlobalSettings, language: 'zh-CN', copilotSummaryLanguage: 'zh-CN', copilotReviewLanguage: 'zh-CN',
 });
 assert.deepEqual(parseGlobalSettings('{"language":"invalid","copilotSummaryLanguage":"invalid","copilotReviewLanguage":"invalid"}'), defaultGlobalSettings);
+assert.equal(parseGlobalSettings('{"autoGenerateTopics":false}').autoGenerateTopics, false);
+assert.equal(parseGlobalSettings('{"autoGenerateTopics":"false"}').autoGenerateTopics, true);
 console.log('Global settings test passed');
