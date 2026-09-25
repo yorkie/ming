@@ -82,4 +82,4 @@ Keep repository access read-only and add focused tests for Git inspection, persi
 
 ## License
 
-A license has not been selected yet.
+Ming is released under the [MIT License](LICENSE).

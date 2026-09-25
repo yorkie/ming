@@ -82,4 +82,4 @@ npm run build
 
 ## 许可证
 
-目前尚未为此仓库选择许可证。
+Ming 采用 [MIT 开源协议](LICENSE)。

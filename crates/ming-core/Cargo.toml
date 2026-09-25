@@ -3,6 +3,7 @@ name = "ming-core"
 version = "0.1.0"
 edition = "2021"
 description = "Local-first diff analysis for Ming"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
