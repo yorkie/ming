@@ -2,12 +2,14 @@
 import { computed, onMounted, ref } from 'vue';
 import { listAiUsage, type AiUsageRecord, type Project } from '../lib/projectStore';
 import { language, t } from '../lib/i18n';
+import { hourlyUsage } from '../lib/usageTrends';
 
 const props = defineProps<{ projects: Project[] }>();
 const records = ref<AiUsageRecord[]>([]);
 const selectedProject = ref('');
 const busy = ref(false);
 const error = ref('');
+const chartNow = ref(Date.now());
 const number = new Intl.NumberFormat('en-US');
 const projectNames = computed(() => {
   const names = new Map(records.value.map(record => [record.projectId, record.projectName]));
@@ -35,10 +37,10 @@ const byDay = computed(() => {
   }
   return [...days].map(([day, rows]) => ({ day, ...summary(rows) })).sort((a, b) => b.day.localeCompare(a.day));
 });
-const chartDays = computed(() => byDay.value.slice(0, 14).reverse());
+const chartHours = computed(() => hourlyUsage(visible.value, chartNow.value));
 const chartProjects = computed(() => byProject.value.filter(row => !selectedProject.value || row.id === selectedProject.value)
   .slice().sort((a, b) => b.total - a.total));
-const maxDayTokens = computed(() => Math.max(1, ...chartDays.value.map(row => row.total)));
+const maxHourTokens = computed(() => Math.max(1, ...chartHours.value.map(row => row.total)));
 const maxProjectTokens = computed(() => Math.max(1, ...chartProjects.value.map(row => row.total)));
 const cachedInput = computed(() => Math.min(totals.value.cached, totals.value.prompt));
 const uncachedInput = computed(() => Math.max(0, totals.value.prompt - cachedInput.value));
@@ -50,9 +52,11 @@ const tokenMix = computed(() => {
 });
 function format(value: number | null) { return value === null ? '—' : number.format(value); }
 function date(value: number) { return new Intl.DateTimeFormat(language.value, { dateStyle: 'medium', timeStyle: 'short' }).format(value); }
+function hourLabel(value: number) { return new Intl.DateTimeFormat(language.value, { month: 'numeric', day: 'numeric', hour: '2-digit', hour12: false }).format(value); }
+function tickLabel(value: number) { return new Intl.DateTimeFormat(language.value, { hour: '2-digit', hour12: false }).format(value); }
 async function refresh() {
   busy.value = true; error.value = '';
-  try { records.value = await listAiUsage(); }
+  try { records.value = await listAiUsage(); chartNow.value = Date.now(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause); }
   finally { busy.value = false; }
 }
@@ -69,7 +73,7 @@ onMounted(() => { void refresh(); });
     <div v-else-if="!visible.length && !busy && !error" class="ai-usage-empty">{{ t('No AI requests recorded for this project.') }}</div>
     <template v-if="visible.length">
       <div class="ai-usage-charts">
-        <section class="ai-usage-panel ai-usage-chart-panel ai-usage-trend"><h4>{{ t('Token usage over time') }} <small>{{ language === 'zh-CN' ? `最近 ${chartDays.length} 个有记录的日期` : `Last ${chartDays.length} recorded days` }}</small></h4><div class="ai-usage-chart-body"><div class="ai-usage-chart-legend"><span><i class="ai-usage-key input"></i>{{ t('Input') }}</span><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span></div><div class="ai-usage-day-chart" role="img" :aria-label="`Token usage by day: ${chartDays.map(row => `${row.day}: ${format(row.prompt)} input and ${format(row.completion)} output`).join('; ')}`"><div v-for="row in chartDays" :key="row.day" class="ai-usage-day-column" :title="`${row.day}: ${format(row.prompt)} input, ${format(row.completion)} output`"><div class="ai-usage-day-bar" :style="{ height: `${Math.max(2, row.total / maxDayTokens * 100)}%` }"><div class="ai-usage-bar-output" :style="{ height: `${row.total ? row.completion / row.total * 100 : 0}%` }"></div><div class="ai-usage-bar-input"></div></div><span>{{ row.day.slice(5) }}</span></div></div></div></section>
+        <section class="ai-usage-panel ai-usage-chart-panel ai-usage-trend"><h4>{{ t('Token usage over time') }} <small>{{ t('Last 24 hours · local time') }}</small></h4><div class="ai-usage-chart-body"><div class="ai-usage-chart-legend"><span><i class="ai-usage-key input"></i>{{ t('Input') }}</span><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span></div><div class="ai-usage-day-chart ai-usage-hour-chart" role="img" :aria-label="`${t('Hourly token usage')}: ${chartHours.map(row => `${hourLabel(row.start)}: ${format(row.prompt)} ${t('Input')}, ${format(row.completion)} ${t('Output')}`).join('; ')}`"><div v-for="(row, index) in chartHours" :key="row.start" class="ai-usage-day-column" :title="`${hourLabel(row.start)} · ${t('Input')} ${format(row.prompt)} · ${t('Output')} ${format(row.completion)}`"><div class="ai-usage-day-bar" :style="{ height: `${row.total ? Math.max(2, row.total / maxHourTokens * 100) : 0}%` }"><div class="ai-usage-bar-output" :style="{ height: `${row.total ? row.completion / row.total * 100 : 0}%` }"></div><div class="ai-usage-bar-input"></div></div><span v-if="index % 4 === 0 || index === chartHours.length - 1">{{ tickLabel(row.start) }}</span></div></div></div></section>
         <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Token breakdown') }}</h4><div class="ai-usage-mix-body"><div class="ai-usage-donut" :style="{ background: tokenMix }" role="img" :aria-label="`${format(cachedInput)} cached input, ${format(uncachedInput)} other input, ${format(totals.completion)} output tokens`"><div><strong>{{ format(totals.total) }}</strong><small>tokens</small></div></div><div class="ai-usage-mix-legend"><div><span><i class="ai-usage-key cached"></i>{{ t('Cached input') }}</span><strong>{{ format(cachedInput) }}</strong></div><div><span><i class="ai-usage-key input"></i>{{ t('Other input') }}</span><strong>{{ format(uncachedInput) }}</strong></div><div><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span><strong>{{ format(totals.completion) }}</strong></div></div></div></section>
         <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Usage by project') }}</h4><div class="ai-usage-project-chart"><div v-for="row in chartProjects" :key="row.id" class="ai-usage-project-bar"><div><span :title="row.name">{{ row.name }}</span><strong>{{ format(row.total) }}</strong></div><div class="ai-usage-project-track" role="img" :aria-label="`${row.name}: ${format(row.total)} tokens`"><span :style="{ width: `${row.total / maxProjectTokens * 100}%` }"></span></div></div></div></section>
       </div>
