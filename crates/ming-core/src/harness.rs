@@ -5,9 +5,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 
-const MAX_BATCH_CHARS: usize = 48_000;
+const MAX_BATCH_CHARS: usize = 20_000;
 const MAX_UNIT_CHARS: usize = 12_000;
-const MAX_BATCHES: usize = 12;
+const MAX_BATCH_FILES: usize = 8;
+const MAX_BATCH_UNITS: usize = 20;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Review { files: Vec<File> }
@@ -92,7 +93,7 @@ struct TaskTransition {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TaskProgress { completed: usize, total: usize, current_files: usize }
+struct TaskProgress { completed: usize, total: usize, current_files: usize, current_units: usize }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,17 +142,31 @@ fn batches_for(units: &[Unit]) -> Vec<Vec<usize>> {
     let mut current = Vec::new();
     let mut size = 0;
     for (index, unit) in units.iter().enumerate() {
-        if !current.is_empty() && size + unit.content.len() > MAX_BATCH_CHARS {
+        let new_file = !current.iter().any(|previous: &usize| units[*previous].file_index == unit.file_index);
+        let file_count = current.iter().map(|previous: &usize| units[*previous].file_index).collect::<HashSet<_>>().len();
+        if !current.is_empty() && (size + unit.content.len() > MAX_BATCH_CHARS || current.len() >= MAX_BATCH_UNITS || (new_file && file_count >= MAX_BATCH_FILES)) {
             batches.push(current);
-            if batches.len() == MAX_BATCHES { return batches; }
             current = Vec::new();
             size = 0;
         }
         size += unit.content.len();
         current.push(index);
     }
-    if !current.is_empty() && batches.len() < MAX_BATCHES { batches.push(current); }
+    if !current.is_empty() { batches.push(current); }
     batches
+}
+
+#[wasm_bindgen]
+pub fn split_current_topic_batch(state_json: &str) -> Result<String, JsValue> {
+    let mut state: TaskState = serde_json::from_str(state_json).map_err(error)?;
+    if state.schema_version != 1 || state.task_kind != "topic-review" || state.next_batch >= state.batches.len() {
+        return Err(error("Invalid topic task state"));
+    }
+    let batch = &mut state.batches[state.next_batch];
+    if batch.len() < 2 { return Err(error("DeepSeek truncated the response for a single change unit. Try a model with a larger output limit.")); }
+    let second = batch.split_off(batch.len() / 2);
+    state.batches.insert(state.next_batch + 1, second);
+    transition(state)
 }
 
 fn command(state: &TaskState) -> ModelCommand {
@@ -170,7 +185,8 @@ fn transition(state: TaskState) -> Result<String, JsValue> {
     let current_files = state.batches.get(state.next_batch).map_or(0, |batch| {
         batch.iter().map(|index| state.units[*index].path.as_str()).collect::<HashSet<_>>().len()
     });
-    let progress = TaskProgress { completed: state.next_batch, total: state.batches.len(), current_files };
+    let progress = TaskProgress { completed: state.next_batch, total: state.batches.len(), current_files,
+        current_units: state.batches.get(state.next_batch).map_or(0, Vec::len) };
     let output = if state.next_batch < state.batches.len() {
         TaskTransition { command: Some(command(&state)), state: Some(serde_json::to_string(&state).map_err(error)?), artifact: None, progress }
     } else {
@@ -247,7 +263,7 @@ fn start_title_task(review_json: &str, model: &str, language: &str) -> Result<St
     let output = TaskTransition { state: Some(serde_json::to_string(&state).map_err(error)?),
         command: Some(ModelCommand { provider: "deepseek", model: model.into(), prompt,
             max_output_tokens: 160, timeout_ms: 45_000, max_attempts: 2 }), artifact: None,
-        progress: TaskProgress { completed: 0, total: 1, current_files: review.files.len() } };
+        progress: TaskProgress { completed: 0, total: 1, current_files: review.files.len(), current_units: 0 } };
     serde_json::to_string(&output).map_err(error)
 }
 
@@ -266,7 +282,7 @@ fn advance_title_task(state_json: &str, response_json: &str) -> Result<String, J
     let output = TaskTransition { state: None, command: None,
         artifact: Some(serde_json::json!({ "schemaVersion": 1, "snapshotHash": state.snapshot_hash,
             "model": state.model, "title": title })),
-        progress: TaskProgress { completed: 1, total: 1, current_files: 0 } };
+        progress: TaskProgress { completed: 1, total: 1, current_files: 0, current_units: 0 } };
     serde_json::to_string(&output).map_err(error)
 }
 
@@ -333,11 +349,11 @@ mod tests {
     fn validates_model_references_and_preserves_unassigned_changes() {
         let review = r#"{"files":[{"path":"a.rs","status":"modified","hunks":[{"header":"@@ -1 +1 @@","lines":[{"kind":"add","text":"new"}]}]},{"path":"b.bin","status":"binary","hunks":[]}]}"#;
         let first: serde_json::Value = serde_json::from_str(&start_topic_task(review, "deepseek-flash").unwrap()).unwrap();
-        assert_eq!(first["progress"], serde_json::json!({"completed": 0, "total": 1, "currentFiles": 2}));
+        assert_eq!(first["progress"], serde_json::json!({"completed": 0, "total": 1, "currentFiles": 2, "currentUnits": 2}));
         let state = first["state"].as_str().unwrap();
         let next: serde_json::Value = serde_json::from_str(&advance_topic_task(state, r#"{"topics":[{"title":"Code","summary":"Change","unitIds":["f0h0","made-up"],"checks":[]}]}"#).unwrap()).unwrap();
         let topics = next["artifact"]["topics"].as_array().unwrap();
-        assert_eq!(next["progress"], serde_json::json!({"completed": 1, "total": 1, "currentFiles": 0}));
+        assert_eq!(next["progress"], serde_json::json!({"completed": 1, "total": 1, "currentFiles": 0, "currentUnits": 0}));
         assert_eq!(topics.len(), 2);
         assert_eq!(topics[0]["unitIds"], serde_json::json!(["f0h0"]));
         assert_eq!(topics[1]["unitIds"], serde_json::json!(["f1"]));
@@ -351,11 +367,29 @@ mod tests {
         })).collect();
         let review = serde_json::json!({"files": files}).to_string();
         let first: serde_json::Value = serde_json::from_str(&start_topic_task(&review, "deepseek-flash").unwrap()).unwrap();
-        assert_eq!(first["progress"]["total"], 2);
+        assert_eq!(first["progress"]["total"], 5);
         assert_eq!(first["progress"]["completed"], 0);
         let next: serde_json::Value = serde_json::from_str(&advance_topic_task(first["state"].as_str().unwrap(), r#"{"topics":[]}"#).unwrap()).unwrap();
         assert_eq!(next["progress"]["completed"], 1);
-        assert_eq!(next["progress"]["total"], 2);
+        assert_eq!(next["progress"]["total"], 5);
+    }
+
+    #[test]
+    fn keeps_all_large_review_batches_and_splits_truncated_groups() {
+        let files: Vec<_> = (0..105).map(|index| serde_json::json!({
+            "path": format!("file-{index}.rs"), "status": "modified", "hunks": []
+        })).collect();
+        let review = serde_json::json!({"files": files}).to_string();
+        let mut next: serde_json::Value = serde_json::from_str(&start_topic_task(&review, "deepseek-flash").unwrap()).unwrap();
+        assert_eq!(next["progress"]["total"], 14);
+        next = serde_json::from_str(&split_current_topic_batch(next["state"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(next["progress"]["total"], 15);
+        assert_eq!(next["progress"]["currentFiles"], 4);
+        for _ in 0..15 {
+            next = serde_json::from_str(&advance_topic_task(next["state"].as_str().unwrap(), r#"{"topics":[]}"#).unwrap()).unwrap();
+        }
+        let uncategorized = &next["artifact"]["topics"][0]["unitIds"];
+        assert_eq!(uncategorized.as_array().unwrap().len(), 105);
     }
 
     #[test]

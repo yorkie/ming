@@ -500,6 +500,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .topic-list-item { display: flex; gap: 10px; width: 100%; padding: 13px; border: 0; border-bottom: 1px solid #d8dee4; background: #fff; text-align: left; color: #1f2328; }
 .topic-list-item:last-child { border-bottom: 0; }
 .topic-list-item.active { background: #e6f5ff; box-shadow: inset 3px 0 #0969da; }
+.topic-list-item.reviewed { background: #eaf7ee; }
+.topic-list-item.reviewed.active { box-shadow: inset 3px 0 #1a7f37; }
+.topic-list-item.reviewed .topic-number, .topic-list-item.reviewed .topic-status { color: #1a7f37; font-weight: 600; }
 .topic-review.is-stale .topic-list { border-color: #d8dee4; background: #f6f8fa; }
 .topic-review.is-stale .topic-list-heading, .topic-review.is-stale .topic-list-item { background: #f6f8fa; color: #6e7781; }
 .topic-review.is-stale .topic-list-item.active { background: #eaeef2; box-shadow: inset 3px 0 #8c959f; }

@@ -52,6 +52,11 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  const reviewedTopicRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, reviewed: { 'topic-1': 'reviewed' } } };
+  const reviewedTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: reviewedTopicRecord, data, settings: defaultGlobalSettings }));
+  assert.match(reviewedTopicHtml, /class="[^"]*reviewed[^"]*topic-list-item"/);
+  assert.match(reviewedTopicHtml, /class="topic-status">Reviewed/);
+  assert.match(reviewedTopicHtml, /Mark as unread/);
   const markdownData: Review = { files: [{
     path: 'README.md', status: 'modified', additions: 2, deletions: 2,
     markdown: { before: '# Guide\n\nOld first.\n\nSame.\n\nOld second.\n', after: '# Guide\n\nNew first.\n\nSame.\n\nNew second.\n' },

@@ -10,17 +10,23 @@ export function localizeAiProgress(message: string, language: Language): string 
   };
   if (simple[message]) return simple[message];
 
-  const group = /^Group (\d+) of (\d+) · (\d+) files? · (.+)$/.exec(message);
+  const group = /^Group (\d+) of (\d+) · (\d+) files?(?: · (\d+) changes)? · (.+)$/.exec(message);
   if (group) {
-    const label = `第 ${group[1]}/${group[2]} 组 · ${group[3]} 个文件`;
-    const action = group[4];
+    const label = `第 ${group[1]}/${group[2]} 组 · ${group[3]} 个文件${group[4] ? ` · ${group[4]} 处改动` : ''}`;
+    const action = group[5];
     const waiting = /^waiting for DeepSeek \((\d+)s\)…$/.exec(action);
     if (waiting) return `${label} · 等待 DeepSeek（${waiting[1]} 秒）…`;
+    const first = /^waiting for first response \((\d+)s\)…$/.exec(action);
+    if (first) return `${label} · 等待首段响应（${first[1]} 秒）…`;
+    const received = /^received ([\d,]+) characters \((\d+)s\)…$/.exec(action);
+    if (received) return `${label} · 已接收 ${received[1]} 字，耗时 ${received[2]} 秒…`;
     const requesting = /^requesting DeepSeek(?: \(attempt (\d+)\))?…$/.exec(action);
     if (requesting) return `${label} · 正在请求 DeepSeek${requesting[1] ? `（第 ${requesting[1]} 次）` : ''}…`;
     const retrying = /^DeepSeek returned (\d+); retrying…$/.exec(action);
     if (retrying) return `${label} · DeepSeek 返回 ${retrying[1]}，正在重试…`;
+    if (action === 'output limit reached; splitting this group…') return `${label} · 输出达到上限，正在拆分这一组…`;
     if (action === 'response received; validating topics…') return `${label} · 已收到响应，正在验证主题…`;
+    if (action === 'response received; validating result…') return `${label} · 已收到响应，正在验证结果…`;
   }
 
   const validated = /^Validated group (\d+) of (\d+)\. (Combining topics…|Preparing the next group…)$/.exec(message);
