@@ -50,6 +50,7 @@ const zh: Record<string, string> = {
   'Background tasks': '后台任务', 'Tasks': '任务', 'projects monitored': '个项目正在监听',
   'No background tasks. Enable live review updates in a project’s settings.': '此刻没有后台任务。若想随时获知改动，可在项目设置中开启实时更新。',
   'File watcher': '文件监听', 'Timer checks': '定时检查', 'Scanning changes': '扫描改动中',
+  'Observer event': '文件变化事件', 'Last event': '最近事件',
   'Generating review title': '正在生成评审标题', 'Summarizing the latest diff': '正在概括最新差异',
   'Folder access required': '需要文件夹权限', 'Background task failed': '后台任务失败',
   'Expand file diffs': '展开文件差异', 'Open changed files when a review is selected': '选中评审时展开改动文件',

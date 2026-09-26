@@ -1,10 +1,10 @@
-# Ming
+<p align="center"><img src="public/logo.png" alt="Ming logo" width="300" /></p>
 
-**Review AI-written code with confidence.**
+<p align="center"><strong>Review AI-written code with confidence.</strong></p>
+
+<p align="center"><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a></p>
 
 AI assistants can change an entire repository in one pass. Ming turns the actual local diff into a focused, human-led review before you decide what to keep. It runs in your browser, with no Ming account or application server.
-
-[简体中文](README.zh-CN.md) · [English](README.md)
 
 ## Why Ming
 

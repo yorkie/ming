@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { renderMarkdownRichDiff } from '../src/lib/markdownRichDiff';
+import { markdownSnapshotForHunks, renderMarkdownRichDiff } from '../src/lib/markdownRichDiff';
 import { renderMarkdownDocument, renderMarkdownInline } from '../src/lib/markdownDocument';
 
 const rich = renderMarkdownRichDiff({
@@ -10,9 +10,33 @@ assert.match(rich, /markdown-rich-block context"><h1>Guide<\/h1>/);
 assert.match(rich, /markdown-rich-block delete"><p>Old paragraph\.<\/p>/);
 assert.match(rich, /markdown-rich-block add"><p>New <strong>paragraph<\/strong>\.<\/p>/);
 
+const snapshot = { before: '# Guide\n\nOld first.\n\nSame.\n\nOld second.\n', after: '# Guide\n\nNew first.\n\nSame.\n\nNew second.\n' };
+const hunks = [
+  { header: '@@ -3 +3 @@', lines: [
+    { kind: 'delete' as const, text: 'Old first.', oldNumber: 3, newNumber: null },
+    { kind: 'add' as const, text: 'New first.', oldNumber: null, newNumber: 3 },
+  ] },
+  { header: '@@ -7 +7 @@', lines: [
+    { kind: 'delete' as const, text: 'Old second.', oldNumber: 7, newNumber: null },
+    { kind: 'add' as const, text: 'New second.', oldNumber: null, newNumber: 7 },
+  ] },
+];
+const firstTopic = markdownSnapshotForHunks(snapshot, hunks, [0]);
+assert.equal(firstTopic?.after, '# Guide\n\nNew first.\n\nSame.\n\nOld second.\n');
+assert.doesNotMatch(renderMarkdownRichDiff(firstTopic!), /New second/);
+assert.equal(markdownSnapshotForHunks(snapshot, hunks, [1])?.after, '# Guide\n\nOld first.\n\nSame.\n\nNew second.\n');
+assert.equal(markdownSnapshotForHunks(snapshot, hunks, [0, 1]), snapshot);
+assert.equal(markdownSnapshotForHunks(snapshot, hunks, [2]), null);
+
 const unsafe = renderMarkdownRichDiff({ before: '', after: '<script>alert(1)</script>\n\n![remote](https://example.com/image.png)\n' });
 assert.doesNotMatch(unsafe, /<script>|<img/);
-assert.match(unsafe, /&lt;script&gt;/);
+assert.doesNotMatch(unsafe, /alert\(1\)/);
+assert.match(unsafe, /\[Image: remote\]/);
+const imageDiff = renderMarkdownRichDiff({ before: '', after: '<img src="public/logo.png" alt="Ming logo" width="180" onerror="alert(1)" />\n\n![Icon](./icon.png)\n' });
+assert.match(imageDiff, /<img[^>]+data-project-src="public\/logo\.png"/);
+assert.match(imageDiff, /<img[^>]+width="180"/);
+assert.match(imageDiff, /<img[^>]+data-project-src="\.\/icon\.png"/);
+assert.doesNotMatch(imageDiff, /onerror|\s+src="public\/logo\.png"/);
 const document = renderMarkdownDocument('<div align="center"><img src="./logo.png" alt="Logo" width="320" /><p><strong>Title</strong></p><table><tr><td>Package</td></tr></table></div>');
 assert.match(document, /<div align="center">/);
 assert.match(document, /<img[^>]+data-project-src="\.\/logo\.png"/);

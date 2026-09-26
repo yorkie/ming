@@ -3,21 +3,23 @@ import { loadGlobalSettings } from './globalSettings';
 import { deleteReview, listProjects, listReviews, saveReviewSnapshot, type Project } from './projectStore';
 import type { RepositoryInfo } from './localRepository';
 import type { Review } from './reviewTypes';
-import { language } from './i18n';
+import { language, t } from './i18n';
 import { generateReviewTitleInBackground } from './reviewTitles';
 
 type ObserverRecord = { type: string; relativePathComponents: string[] };
 type Observer = { observe(handle: FileSystemDirectoryHandle, options: { recursive: boolean }): Promise<void>; disconnect(): void };
 type ObserverConstructor = new (callback: (records: ObserverRecord[]) => void) => Observer;
 type ScanResult = { data: string | null; snapshotHash?: string; gitInfo: RepositoryInfo; baseRef: string };
-type Job = { project: Project; mode: 'observer' | 'timer'; observer?: Observer; timer?: number; debounce?: number; running: boolean; pending: boolean; paused: boolean; stopped: boolean; lastRun: number; worker?: Worker; cancelWorker?: () => void; active?: Promise<void> };
+type Job = { project: Project; mode: 'observer' | 'timer'; observer?: Observer; timer?: number; debounce?: number; running: boolean; pending: boolean; paused: boolean; stopped: boolean; lastRun: number; lastObservedPath?: string; worker?: Worker; cancelWorker?: () => void; active?: Promise<void> };
 
-export type LiveReviewStatus = { phase: 'watching' | 'polling' | 'scanning' | 'permission' | 'error'; detail?: string };
+export type LiveReviewStatus = { phase: 'watching' | 'polling' | 'scanning' | 'permission' | 'error'; mode?: 'observer' | 'timer'; detail?: string };
 export const liveReviewStatuses = reactive(new Map<string, LiveReviewStatus>());
 const jobs = new Map<string, Job>();
 let started = false;
 
-function status(job: Job, phase: LiveReviewStatus['phase'], detail?: string) { liveReviewStatuses.set(job.project.id, { phase, detail }); }
+function status(job: Job, phase: LiveReviewStatus['phase'], detail?: string) {
+  liveReviewStatuses.set(job.project.id, { phase, mode: job.observer ? 'observer' : job.timer ? 'timer' : undefined, detail });
+}
 function notify(projectId: string) { window.dispatchEvent(new CustomEvent('ming:reviews-changed', { detail: { projectId } })); }
 function waitForWorker<T>(worker: Worker, request: unknown, job: Job): Promise<T> {
   job.worker = worker;
@@ -33,7 +35,7 @@ function waitForWorker<T>(worker: Worker, request: unknown, job: Job): Promise<T
 }
 async function reconcile(job: Job) {
   const selected = job.project;
-  status(job, 'scanning');
+  status(job, 'scanning', job.observer && job.lastObservedPath ? `${t('Observer event')}: ${job.lastObservedPath}` : undefined);
   const scanned = await waitForWorker<ScanResult>(new Worker(new URL('../workers/scanWorker.ts', import.meta.url), { type: 'module' }),
     { directory: selected.directory, baseRef: selected.settings.baseRef, uiLanguage: language.value }, job);
   if (job.stopped) return;
@@ -63,7 +65,7 @@ async function run(job: Job) {
         if (lock) await reconcile(job);
       });
     } else await reconcile(job);
-    if (!job.stopped) status(job, job.observer ? 'watching' : 'polling');
+    if (!job.stopped) status(job, job.observer ? 'watching' : 'polling', job.observer && job.lastObservedPath ? `${t('Last event')}: ${job.lastObservedPath}` : undefined);
   } catch (error) {
     if (!job.stopped && !job.paused) status(job, 'error', error instanceof Error ? error.message : String(error));
   } finally {
@@ -93,7 +95,10 @@ async function watchProject(job: Job) {
         if (records.some(record => record.type === 'errored')) {
           observer.disconnect(); job.observer = undefined; startTimer(job); return;
         }
-        if (records.length) schedule(job);
+        if (records.length) {
+          job.lastObservedPath = records[0]?.relativePathComponents.join('/') || '.';
+          schedule(job);
+        }
       });
       await observer.observe(job.project.directory, { recursive: true });
       if (job.stopped) { observer.disconnect(); return; }
@@ -105,8 +110,8 @@ async function watchProject(job: Job) {
 }
 function startTimer(job: Job) {
   if (job.stopped || job.timer) return;
-  status(job, 'polling');
   job.timer = window.setInterval(() => schedule(job), 30_000);
+  status(job, 'polling');
 }
 function stopJob(job: Job) {
   job.stopped = true;
@@ -139,7 +144,7 @@ function onVisibility() {
   void refreshLiveReviews();
   for (const job of jobs.values()) {
     if (liveReviewStatuses.get(job.project.id)?.phase === 'permission') void watchProject(job);
-    else if (Date.now() - job.lastRun > 5_000) schedule(job, true);
+    else if (job.timer && Date.now() - job.lastRun > 30_000) schedule(job, true);
   }
 }
 export function startLiveReviews() {

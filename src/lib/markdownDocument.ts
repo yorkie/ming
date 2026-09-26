@@ -11,8 +11,8 @@ export function renderMarkdownInline(source: string): string {
   });
 }
 
-export function renderMarkdownDocument(source: string): string {
-  const html = sanitizeHtml(documentMarkdown.render(source), {
+export function sanitizeMarkdownHtml(html: string, localImagesOnly = false): string {
+  return sanitizeHtml(html, {
     allowedTags: [...sanitizeHtml.defaults.allowedTags, 'img'],
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
@@ -26,11 +26,17 @@ export function renderMarkdownDocument(source: string): string {
     transformTags: {
       img: (tagName, attributes) => {
         const src = attributes.src ?? '';
+        if (localImagesOnly && (!src || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(src))) {
+          return { tagName: 'span', attribs: { class: 'markdown-image' }, text: `[Image: ${attributes.alt || 'image'}]` };
+        }
         if (!src || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(src)) return { tagName, attribs: attributes };
         const { src: _src, ...remaining } = attributes;
         return { tagName, attribs: { ...remaining, 'data-project-src': src } };
       },
     },
   });
-  return `<div class="markdown-rich-diff">${html}</div>`;
+}
+
+export function renderMarkdownDocument(source: string): string {
+  return `<div class="markdown-rich-diff">${sanitizeMarkdownHtml(documentMarkdown.render(source))}</div>`;
 }

@@ -52,6 +52,55 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  const markdownData: Review = { files: [{
+    path: 'README.md', status: 'modified', additions: 2, deletions: 2,
+    markdown: { before: '# Guide\n\nOld first.\n\nSame.\n\nOld second.\n', after: '# Guide\n\nNew first.\n\nSame.\n\nNew second.\n' },
+    hunks: [
+      { header: '@@ -3 +3 @@', lines: [
+        { kind: 'delete', text: 'Old first.', oldNumber: 3, newNumber: null },
+        { kind: 'add', text: 'New first.', oldNumber: null, newNumber: 3 },
+      ] },
+      { header: '@@ -7 +7 @@', lines: [
+        { kind: 'delete', text: 'Old second.', oldNumber: 7, newNumber: null },
+        { kind: 'add', text: 'New second.', oldNumber: null, newNumber: 7 },
+      ] },
+    ],
+  }], additions: 2, deletions: 2 };
+  const markdownRecord: ReviewRecord = { ...record, id: 'review-md', snapshotHash: 'markdown', data: JSON.stringify(markdownData), aiReview: {
+    createdAt: 2, reviewed: {}, artifact: { schemaVersion: 1, snapshotHash: 'markdown', model: 'deepseek-flash',
+      topics: [{ id: 'topic-md', title: 'Update first section', summary: 'Update Markdown.', checks: [], unitIds: ['f0h0'] }] },
+  } };
+  const markdownSettings = { ...defaultGlobalSettings, richMarkdownByDefault: true };
+  const markdownChangesHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [markdownRecord], record: markdownRecord, data: markdownData, reviewView: 'changes', settings: markdownSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  const markdownTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: markdownRecord, data: markdownData, settings: markdownSettings }));
+  assert.match(markdownChangesHtml, /View Rich diff/);
+  assert.match(markdownTopicHtml, /View Rich diff/);
+  assert.match(markdownChangesHtml, /markdown-rich-diff/);
+  assert.match(markdownTopicHtml, /markdown-rich-diff/);
+  assert.match(markdownChangesHtml, /New second\./);
+  assert.doesNotMatch(markdownTopicHtml, /New second\./);
+  assert.match(markdownTopicHtml, /New first\./);
+  const cssData: Review = { files: [{ path: 'theme.css', status: 'modified', additions: 1, deletions: 1,
+    hunks: [{ header: '@@ -1 +1 @@', lines: [
+      { kind: 'delete', text: '.title { color: red; }', oldNumber: 1, newNumber: null },
+      { kind: 'add', text: '.title { color: blue; }', oldNumber: null, newNumber: 1 },
+    ] }] }], additions: 1, deletions: 1 };
+  const cssRecord: ReviewRecord = { ...markdownRecord, id: 'review-css', data: JSON.stringify(cssData) };
+  const cssChangesHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [cssRecord], record: cssRecord, data: cssData, reviewView: 'changes', settings: markdownSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  const cssTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: cssRecord, data: cssData, settings: markdownSettings }));
+  assert.match(cssChangesHtml, /Selector view/);
+  assert.match(cssTopicHtml, /Selector view/);
+  assert.match(cssChangesHtml, /css-review-rule/);
+  assert.match(cssTopicHtml, /css-review-rule/);
+  assert.doesNotMatch(topicHtml, /View Rich diff|Selector view/);
   const latestData: Review = { ...data, files: [{ ...data.files[0]!, path: 'src/new.ts' }] };
   const staleRecord: ReviewRecord = { ...topicRecord, data: JSON.stringify(latestData), snapshotHash: 'new-snapshot',
     aiReview: { ...topicRecord.aiReview!, sourceData: JSON.stringify(data) } };

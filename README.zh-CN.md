@@ -1,10 +1,10 @@
-# Ming
+<p align="center"><img src="public/logo.png" alt="Ming Logo" width="300" /></p>
 
-**放心地评审 AI 编写的代码。**
+<p align="center"><strong>放心地评审 AI 编写的代码。</strong></p>
+
+<p align="center"><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a></p>
 
 AI 编程助手可以一次改动整个仓库。Ming 将真实的本地 diff 变成聚焦、由人主导的评审，让你在决定保留哪些改动之前看清它们。它运行在浏览器中，不需要 Ming 账号或应用服务器。
-
-[简体中文](README.zh-CN.md) · [English](README.md)
 
 ## 为什么需要 Ming
 

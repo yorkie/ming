@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import type { ChartConfiguration } from 'chart.js';
+import UsageChart from './UsageChart.vue';
 import { listAiUsage, type AiUsageRecord, type Project } from '../lib/projectStore';
 import { language, t } from '../lib/i18n';
 import { hourlyUsage } from '../lib/usageTrends';
@@ -40,20 +42,45 @@ const byDay = computed(() => {
 const chartHours = computed(() => hourlyUsage(visible.value, chartNow.value));
 const chartProjects = computed(() => byProject.value.filter(row => !selectedProject.value || row.id === selectedProject.value)
   .slice().sort((a, b) => b.total - a.total));
-const maxHourTokens = computed(() => Math.max(1, ...chartHours.value.map(row => row.total)));
-const maxProjectTokens = computed(() => Math.max(1, ...chartProjects.value.map(row => row.total)));
+const chartColors = { input: '#0969da', output: '#1a7f37', cached: '#fd8c73', muted: '#59636e', grid: '#eaeef2' };
 const cachedInput = computed(() => Math.min(totals.value.cached, totals.value.prompt));
 const uncachedInput = computed(() => Math.max(0, totals.value.prompt - cachedInput.value));
 const chartTotal = computed(() => cachedInput.value + uncachedInput.value + totals.value.completion);
-const tokenMix = computed(() => {
-  const cached = chartTotal.value ? cachedInput.value / chartTotal.value * 100 : 0;
-  const input = chartTotal.value ? uncachedInput.value / chartTotal.value * 100 : 0;
-  return chartTotal.value ? `conic-gradient(#8250df 0 ${cached}%, #0969da ${cached}% ${cached + input}%, #1a7f37 ${cached + input}% 100%)` : '#eaeef2';
-});
+const trendConfig = computed<ChartConfiguration>(() => ({
+  type: 'bar',
+  data: {
+    labels: chartHours.value.map(row => hourLabel(row.start)),
+    datasets: [
+      { label: t('Input'), data: chartHours.value.map(row => row.prompt), backgroundColor: chartColors.input, stack: 'tokens' },
+      { label: t('Output'), data: chartHours.value.map(row => row.completion), backgroundColor: chartColors.output, stack: 'tokens' },
+    ],
+  },
+  options: { responsive: true, maintainAspectRatio: false, color: chartColors.muted,
+    plugins: { legend: { position: 'top', labels: { color: chartColors.muted } } },
+    scales: { x: { stacked: true, ticks: { maxTicksLimit: 7, color: chartColors.muted }, grid: { color: chartColors.grid } },
+      y: { stacked: true, beginAtZero: true, ticks: { color: chartColors.muted }, grid: { color: chartColors.grid } } } },
+}));
+const mixConfig = computed<ChartConfiguration>(() => ({
+  type: 'doughnut',
+  data: { labels: [t('Cached input'), t('Other input'), t('Output')], datasets: [{
+    data: [cachedInput.value, uncachedInput.value, totals.value.completion],
+    backgroundColor: [chartColors.cached, chartColors.input, chartColors.output], borderWidth: 0,
+  }] },
+  options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } },
+}));
+const projectConfig = computed<ChartConfiguration>(() => ({
+  type: 'bar',
+  data: { labels: chartProjects.value.map(row => row.name), datasets: [{
+    label: t('Total tokens'), data: chartProjects.value.map(row => row.total), backgroundColor: chartColors.input,
+  }] },
+  options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, color: chartColors.muted,
+    plugins: { legend: { display: false } },
+    scales: { x: { beginAtZero: true, ticks: { color: chartColors.muted }, grid: { color: chartColors.grid } },
+      y: { ticks: { color: chartColors.muted }, grid: { display: false } } } },
+}));
 function format(value: number | null) { return value === null ? '—' : number.format(value); }
 function date(value: number) { return new Intl.DateTimeFormat(language.value, { dateStyle: 'medium', timeStyle: 'short' }).format(value); }
 function hourLabel(value: number) { return new Intl.DateTimeFormat(language.value, { month: 'numeric', day: 'numeric', hour: '2-digit', hour12: false }).format(value); }
-function tickLabel(value: number) { return new Intl.DateTimeFormat(language.value, { hour: '2-digit', hour12: false }).format(value); }
 async function refresh() {
   busy.value = true; error.value = '';
   try { records.value = await listAiUsage(); chartNow.value = Date.now(); }
@@ -73,9 +100,9 @@ onMounted(() => { void refresh(); });
     <div v-else-if="!visible.length && !busy && !error" class="ai-usage-empty">{{ t('No AI requests recorded for this project.') }}</div>
     <template v-if="visible.length">
       <div class="ai-usage-charts">
-        <section class="ai-usage-panel ai-usage-chart-panel ai-usage-trend"><h4>{{ t('Token usage over time') }} <small>{{ t('Last 24 hours · local time') }}</small></h4><div class="ai-usage-chart-body"><div class="ai-usage-chart-legend"><span><i class="ai-usage-key input"></i>{{ t('Input') }}</span><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span></div><div class="ai-usage-day-chart ai-usage-hour-chart" role="img" :aria-label="`${t('Hourly token usage')}: ${chartHours.map(row => `${hourLabel(row.start)}: ${format(row.prompt)} ${t('Input')}, ${format(row.completion)} ${t('Output')}`).join('; ')}`"><div v-for="(row, index) in chartHours" :key="row.start" class="ai-usage-day-column" :title="`${hourLabel(row.start)} · ${t('Input')} ${format(row.prompt)} · ${t('Output')} ${format(row.completion)}`"><div class="ai-usage-day-bar" :style="{ height: `${row.total ? Math.max(2, row.total / maxHourTokens * 100) : 0}%` }"><div class="ai-usage-bar-output" :style="{ height: `${row.total ? row.completion / row.total * 100 : 0}%` }"></div><div class="ai-usage-bar-input"></div></div><span v-if="index % 4 === 0 || index === chartHours.length - 1">{{ tickLabel(row.start) }}</span></div></div></div></section>
-        <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Token breakdown') }}</h4><div class="ai-usage-mix-body"><div class="ai-usage-donut" :style="{ background: tokenMix }" role="img" :aria-label="`${format(cachedInput)} cached input, ${format(uncachedInput)} other input, ${format(totals.completion)} output tokens`"><div><strong>{{ format(totals.total) }}</strong><small>tokens</small></div></div><div class="ai-usage-mix-legend"><div><span><i class="ai-usage-key cached"></i>{{ t('Cached input') }}</span><strong>{{ format(cachedInput) }}</strong></div><div><span><i class="ai-usage-key input"></i>{{ t('Other input') }}</span><strong>{{ format(uncachedInput) }}</strong></div><div><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span><strong>{{ format(totals.completion) }}</strong></div></div></div></section>
-        <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Usage by project') }}</h4><div class="ai-usage-project-chart"><div v-for="row in chartProjects" :key="row.id" class="ai-usage-project-bar"><div><span :title="row.name">{{ row.name }}</span><strong>{{ format(row.total) }}</strong></div><div class="ai-usage-project-track" role="img" :aria-label="`${row.name}: ${format(row.total)} tokens`"><span :style="{ width: `${row.total / maxProjectTokens * 100}%` }"></span></div></div></div></section>
+        <section class="ai-usage-panel ai-usage-chart-panel ai-usage-trend"><h4>{{ t('Token usage over time') }} <small>{{ t('Last 24 hours · local time') }}</small></h4><div class="ai-usage-chart-body"><div class="ai-usage-chart-canvas"><UsageChart :config="trendConfig" :label="`${t('Hourly token usage')}: ${chartHours.map(row => `${hourLabel(row.start)}: ${format(row.prompt)} ${t('Input')}, ${format(row.completion)} ${t('Output')}`).join('; ')}`" /></div></div></section>
+        <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Token breakdown') }}</h4><div class="ai-usage-mix-body"><div class="ai-usage-mix-canvas"><UsageChart :config="mixConfig" :label="`${format(cachedInput)} ${t('Cached input')}, ${format(uncachedInput)} ${t('Other input')}, ${format(totals.completion)} ${t('Output')}`" /></div><div class="ai-usage-mix-legend"><div><span><i class="ai-usage-key cached"></i>{{ t('Cached input') }}</span><strong>{{ format(cachedInput) }}</strong></div><div><span><i class="ai-usage-key input"></i>{{ t('Other input') }}</span><strong>{{ format(uncachedInput) }}</strong></div><div><span><i class="ai-usage-key output"></i>{{ t('Output') }}</span><strong>{{ format(totals.completion) }}</strong></div></div></div></section>
+        <section class="ai-usage-panel ai-usage-chart-panel"><h4>{{ t('Usage by project') }}</h4><div class="ai-usage-project-chart"><div class="ai-usage-project-canvas" :style="{ height: `${Math.max(180, chartProjects.length * 36)}px` }"><UsageChart :config="projectConfig" :label="`${t('Usage by project')}: ${chartProjects.map(row => `${row.name}: ${format(row.total)}`).join('; ')}`" /></div></div></section>
       </div>
       <section v-if="!selectedProject" class="ai-usage-panel"><h4>{{ t('By project') }}</h4><div class="ai-usage-table-wrap"><table><thead><tr><th>{{ t('Project') }}</th><th>{{ t('Requests') }}</th><th>{{ t('Input') }}</th><th>{{ t('Output') }}</th><th>{{ t('Total tokens') }}</th></tr></thead><tbody><tr v-for="row in byProject" :key="row.id"><td>{{ row.name }}</td><td>{{ format(row.requests) }}</td><td>{{ format(row.prompt) }}</td><td>{{ format(row.completion) }}</td><td>{{ format(row.total) }}</td></tr></tbody></table></div></section>
       <section class="ai-usage-panel"><h4>{{ t('By day') }}</h4><div class="ai-usage-table-wrap"><table><thead><tr><th>{{ t('Day') }}</th><th>{{ t('Requests') }}</th><th>{{ t('Input') }}</th><th>{{ t('Output') }}</th><th>{{ t('Total tokens') }}</th></tr></thead><tbody><tr v-for="row in byDay" :key="row.day"><td>{{ row.day }}</td><td>{{ format(row.requests) }}</td><td>{{ format(row.prompt) }}</td><td>{{ format(row.completion) }}</td><td>{{ format(row.total) }}</td></tr></tbody></table></div></section>

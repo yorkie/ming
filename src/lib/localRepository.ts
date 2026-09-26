@@ -246,7 +246,7 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
   let lastProgress = 0;
   const fs = new BrowserRepositoryFs(root, path => {
     scannedDirectories++;
-    if (scannedDirectories > 500) throw new Error(`Scan stopped after 500 directories near ${path}. Add generated or unrelated directories to .gitignore, then scan again.`);
+    if (scannedDirectories > 10_000) throw new Error(`Scan stopped after 10,000 directories near ${path}. Add generated or unrelated directories to .gitignore, then scan again.`);
     const now = Date.now();
     if (scannedDirectories === 1 || now - lastProgress >= 100) {
       onProgress?.(`Scanning directory: ${path === '.' ? root.name : path} (${scannedDirectories} checked)…`);
@@ -260,9 +260,13 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
   if (ref !== 'HEAD' && !headOid) throw new Error(`Comparison ref not found: ${ref}`);
   // isomorphic-git otherwise rewrites .git/index to refresh stat data.
   const matrix = await git.statusMatrix({ fs: gitFs, dir, ref, refresh: false, ignored: false });
+  // The index also contains files added since the comparison ref. Count those
+  // with the Git tree, while leaving ordinary untracked files out of its cap.
+  // statusMatrix excludes ignored untracked files when ignored is false.
   const changed = matrix.filter(([, head, workdir]) => head !== workdir);
-  onProgress?.(`Found ${changed.length} changed files. Generating diffs…`);
-  if (changed.length > 200) throw new Error(`This repository has ${changed.length} changed files. A scan can handle up to 200 files.`);
+  const trackedCount = changed.filter(([, head, , stage]) => head !== 0 || stage !== 0).length;
+  onProgress?.(`Found ${trackedCount} Git tree changes and ${changed.length - trackedCount} untracked files. Generating diffs…`);
+  if (trackedCount > 500) throw new Error(`This repository has ${trackedCount} changed Git tree files. A scan can handle up to 500 Git tree files; untracked files do not count toward this limit.`);
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const patches: string[] = [];
 

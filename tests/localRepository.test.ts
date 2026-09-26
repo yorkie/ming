@@ -122,5 +122,23 @@ try {
   const reviewSnapshot = await readCommitHistory(directory(root), baselineOid, branch);
   assert.deepEqual(reviewSnapshot.localOnly, []);
   assert.deepEqual(reviewSnapshot.remoteOnly.map(commit => commit.title), ['remote change']);
+  // The Git tree cap must not include ignored build output or ordinary
+  // untracked files, even when their combined count exceeds the old cap.
+  await writeFile(join(root, '.gitignore'), 'dist/\n*.log\nbuild/\n');
+  await mkdir(join(root, 'build'));
+  await Promise.all(Array.from({ length: 510 }, (_, index) => mkdir(join(root, 'build', `part-${index}`))));
+  await Promise.all(Array.from({ length: 210 }, (_, index) => writeFile(join(root, `untracked-${index}.txt`), 'new\n')));
+  const manyUntrackedPatch = await readLocalRepository(directory(root));
+  assert.match(manyUntrackedPatch, /diff --git a\/untracked-209\.txt b\/untracked-209\.txt/);
+  assert.doesNotMatch(manyUntrackedPatch, /build\/part-/);
+  await mkdir(join(root, 'tracked-many'));
+  await Promise.all(Array.from({ length: 501 }, (_, index) => writeFile(join(root, 'tracked-many', `${index}.txt`), 'before\n')));
+  run('add', 'tracked-many');
+  run('commit', '-m', 'many tracked files');
+  await Promise.all(Array.from({ length: 501 }, (_, index) => writeFile(join(root, 'tracked-many', `${index}.txt`), 'after\n')));
+  await assert.rejects(readLocalRepository(directory(root)), /501 changed Git tree files.*500 Git tree files/);
+  await writeFile(join(root, 'tracked-many', '500.txt'), 'before\n');
+  const cappedPatch = await readLocalRepository(directory(root));
+  assert.match(cappedPatch, /diff --git a\/tracked-many\/499\.txt b\/tracked-many\/499\.txt/);
   console.log('Local repository integration test passed');
 } finally { await rm(root, { recursive: true, force: true }); }

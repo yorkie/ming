@@ -28,6 +28,7 @@ const emit = defineEmits<{
   globalSettings: [];
 }>();
 const pickerOpen = ref(false);
+const logoUrl = `${import.meta.env.BASE_URL}logo-header.png`;
 const picker = ref<HTMLElement | null>(null);
 const options = ref<HTMLButtonElement[]>([]);
 const categories: { id: GlobalSettingsSection; label: string; icon: string }[] = [
@@ -56,7 +57,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
 <template>
   <div class="app-shell" :class="{ 'hide-line-numbers': props.hideLineNumbers }" :style="{ '--code-font-size': `${props.codeFontSize ?? 13}px`, '--code-line-height': `${props.codeLineHeight ?? 24}px` }">
     <header class="masthead">
-      <button id="home" class="wordmark" aria-label="Ming home" @click="emit('home')"><span class="wordmark-sign">M</span><span>ming<span class="wordmark-point">.</span></span></button>
+      <button id="home" class="wordmark" aria-label="Ming home" @click="emit('home')"><img class="wordmark-logo" :src="logoUrl" alt="Ming" /></button>
       <div class="top-project-picker">
         <span class="project-picker-label">{{ t('Projects') }}</span>
         <div ref="picker" class="project-picker" @keydown="pickerKey">
