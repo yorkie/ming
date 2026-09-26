@@ -9,6 +9,7 @@ type Page = 'files' | 'reviews' | 'branches' | 'settings';
 const props = defineProps<{
   projects: Project[];
   activeProject?: Project | null;
+  hideProjectSettings?: boolean;
   mode: 'home' | 'project' | 'settings';
   page?: Page;
   reviewCount?: number;
@@ -78,7 +79,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
           <button type="button" :class="{ active: page === 'files' }" @click="emit('selectPage', 'files')"><i class="bi bi-folder2" aria-hidden="true"></i><span class="project-nav-text">{{ t('Files') }}</span></button>
           <button type="button" :class="{ active: page === 'reviews' }" @click="emit('selectPage', 'reviews')"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span class="project-nav-text">{{ t('Reviews') }}</span><span class="project-nav-count">{{ reviewCount ?? 0 }}</span></button>
           <button type="button" :class="{ active: page === 'branches' }" @click="emit('selectPage', 'branches')"><i class="bi bi-git" aria-hidden="true"></i><span class="project-nav-text">{{ t('Branches') }}</span><span class="project-nav-count">{{ branchCount ?? '—' }}</span></button>
-          <button type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">{{ t('Settings') }}</span></button>
+          <button v-if="!hideProjectSettings" type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">{{ t('Settings') }}</span></button>
         </nav></div>
         <div v-else class="rail-section"><div class="rail-heading"><span>{{ t('Workspace') }}</span></div><p class="rail-empty">{{ t('Select a project above.') }}</p></div>
         <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" :aria-label="t('MING Console')" :title="t('MING Console')" @click="emit('globalSettings')"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>{{ t('MING Console') }}</span></button></div>

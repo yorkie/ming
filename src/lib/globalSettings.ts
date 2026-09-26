@@ -1,5 +1,6 @@
 export type GlobalSettings = {
   language: 'en' | 'zh-CN';
+  showDemoProject: boolean;
   codeFontSize: number;
   codeLineHeight: number;
   syntaxHighlighting: boolean;
@@ -21,6 +22,7 @@ const LEGACY_STORAGE_KEY = 'ming-global-settings-v1';
 
 export const defaultGlobalSettings: GlobalSettings = {
   language: 'en',
+  showDemoProject: true,
   codeFontSize: 13, codeLineHeight: 24,
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
@@ -39,6 +41,7 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
     const shortText = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
     return {
       language: choice(settings.language, ['en', 'zh-CN'], defaultGlobalSettings.language),
+      showDemoProject: flag(settings.showDemoProject, true),
       codeFontSize: choice(settings.codeFontSize, [12, 13, 14, 15, 16], defaultGlobalSettings.codeFontSize),
       codeLineHeight: choice(settings.codeLineHeight, [20, 24, 28, 32], defaultGlobalSettings.codeLineHeight),
       syntaxHighlighting: flag(settings.syntaxHighlighting, true),
@@ -64,4 +67,8 @@ export function loadGlobalSettings(): GlobalSettings {
 
 export function saveGlobalSettings(settings: GlobalSettings): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+export function shouldShowDemoProject(settings: GlobalSettings, projectCount: number, hasCreatedRealProject: boolean): boolean {
+  return settings.showDemoProject && projectCount === 0 && !hasCreatedRealProject;
 }

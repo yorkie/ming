@@ -8,5 +8,6 @@ export async function addLocalProject(projects: Project[]): Promise<Project> {
   for (const existing of projects) if (await existing.directory.isSameEntry(directory)) return existing;
   const project: Project = { id: crypto.randomUUID(), name: directory.name, directory, addedAt: Date.now(), settings: { baseRef: 'HEAD', liveReview: true } };
   await rememberProject(project);
+  localStorage.setItem('ming-created-real-project', '1');
   return project;
 }

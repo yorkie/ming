@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { defaultGlobalSettings, parseGlobalSettings } from '../src/lib/globalSettings';
+import { defaultGlobalSettings, parseGlobalSettings, shouldShowDemoProject } from '../src/lib/globalSettings';
 
 assert.deepEqual(parseGlobalSettings(null), defaultGlobalSettings);
 assert.deepEqual(parseGlobalSettings('{"codeFontSize":15,"codeLineHeight":28}'), { ...defaultGlobalSettings, codeFontSize: 15, codeLineHeight: 28 });
@@ -18,4 +18,8 @@ assert.deepEqual(parseGlobalSettings('{"language":"zh-CN","copilotSummaryLanguag
 assert.deepEqual(parseGlobalSettings('{"language":"invalid","copilotSummaryLanguage":"invalid","copilotReviewLanguage":"invalid"}'), defaultGlobalSettings);
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"timer"}').fileChangeDetection, 'timer');
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"invalid"}').fileChangeDetection, 'observer');
+assert.equal(shouldShowDemoProject(defaultGlobalSettings, 0, false), true);
+assert.equal(shouldShowDemoProject({ ...defaultGlobalSettings, showDemoProject: false }, 0, false), false);
+assert.equal(shouldShowDemoProject(defaultGlobalSettings, 1, false), false);
+assert.equal(shouldShowDemoProject(defaultGlobalSettings, 0, true), false);
 console.log('Global settings test passed');

@@ -10,7 +10,7 @@ import AiGenerationProgress from './AiGenerationProgress.vue';
 import type { AiActivity } from '../lib/aiActivity';
 import { language, t } from '../lib/i18n';
 
-const props = defineProps<{ project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; aiBusy?: boolean; aiProgress?: string; aiCompleted?: number; aiTotal?: number; aiActivity?: AiActivity[] }>();
+const props = defineProps<{ demo?: boolean; project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; aiBusy?: boolean; aiProgress?: string; aiCompleted?: number; aiTotal?: number; aiActivity?: AiActivity[] }>();
 const emit = defineEmits<{ markTopic: [id: string, status: 'reviewed' | 'needs-work' | null]; generateAiReview: []; cancelAiReview: [] }>();
 const topics = computed(() => props.record.aiReview?.artifact.topics ?? []);
 const stale = computed(() => topicsAreStale(props.record));
@@ -80,7 +80,7 @@ async function selectTopic(id: string) {
         </div>
         <ul v-if="activeTopic.checks.length"><li v-for="(check, index) in activeTopic.checks" :key="index" v-html="renderMarkdownInline(check)"></li></ul>
       </div>
-      <div v-if="topicData" class="topic-diffs"><DiffFile v-for="entry in files" :key="`${record.id}:${activeTopic.id}:${entry.index}`" :file="entry.file" :index="entry.index" :hunk-indices="entry.hunkIndices" :project="project" :record="record" :data="topicData" :settings="settings" :selected="false" :read-only="stale" /></div>
+      <div v-if="topicData" class="topic-diffs"><DiffFile v-for="entry in files" :key="`${record.id}:${activeTopic.id}:${entry.index}`" :file="entry.file" :index="entry.index" :hunk-indices="entry.hunkIndices" :project="project" :record="record" :data="topicData" :settings="settings" :selected="false" :read-only="stale || demo" /></div>
       <p v-else class="topic-old-diff-unavailable">{{ t('The previous diff is unavailable. Regenerate topics to review the latest changes.') }}</p>
     </section>
     <div v-if="activeTopic && showFloatingActions && !stale && !aiBusy" class="topic-floating-actions" :aria-label="`Review actions for ${activeTopic.title}`"><button type="button" class="button-outline" :aria-pressed="status(activeTopic) === 'needs-work'" @click="markTopic(activeTopic, 'needs-work')">{{ t(status(activeTopic) === 'needs-work' ? 'Clear flag' : 'Needs another look') }}</button><button type="button" class="button-primary" :aria-pressed="status(activeTopic) === 'reviewed'" @click="markTopic(activeTopic, 'reviewed')">{{ t(status(activeTopic) === 'reviewed' ? 'Mark as unread' : 'Mark reviewed') }}</button></div>
