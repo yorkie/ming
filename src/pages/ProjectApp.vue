@@ -13,6 +13,7 @@ import type { Review } from '../lib/reviewTypes';
 import type { AiRequestUsage, TopicArtifact } from '../lib/aiReviewTypes';
 import { language, t } from '../lib/i18n';
 import { localizeAiProgress } from '../lib/aiProgress';
+import type { AiActivity } from '../lib/aiActivity';
 import { pauseLiveReview, pauseLiveReviewForScan } from '../lib/liveReviews';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
@@ -49,6 +50,8 @@ const aiProgress = ref('');
 const displayedAiProgress = computed(() => localizeAiProgress(aiProgress.value, language.value));
 const aiCompleted = ref(0);
 const aiTotal = ref(0);
+const aiActivity = shallowRef<AiActivity[]>([]);
+const aiActivityReviewId = ref<string | null>(null);
 const commitHistory = shallowRef<CommitHistory | null>(null);
 const commitsBusy = ref(false);
 const commitsError = ref('');
@@ -315,6 +318,8 @@ async function generateAiReview() {
   if (!key) { note('Add a DeepSeek API key in Copilot settings first.', true); return; }
   reviewView.value = 'topics';
   aiBusy.value = true; aiProgress.value = t('Preparing topic review…'); aiCompleted.value = 0; aiTotal.value = 0; message.value = '';
+  aiActivity.value = [];
+  aiActivityReviewId.value = selected.id;
   const resumeLiveReview = await pauseLiveReview(selected.projectId);
   const worker = new Worker(new URL('../workers/aiTaskWorker.ts', import.meta.url), { type: 'module' });
   const usageWrites: Promise<void>[] = [];
@@ -322,8 +327,12 @@ async function generateAiReview() {
   try {
     const artifact = await new Promise<TopicArtifact>((resolve, reject) => {
       cancelAiReview = () => { worker.terminate(); cancelAiReview = null; reject(new DOMException('AI review canceled', 'AbortError')); };
-      worker.onmessage = (event: MessageEvent<{ type: 'progress'; message: string; completed: number; total: number } | { type: 'usage'; usage: AiRequestUsage } | { type: 'done'; artifact: TopicArtifact } | { type: 'error'; message: string }>) => {
+      worker.onmessage = (event: MessageEvent<{ type: 'progress'; message: string; completed: number; total: number } | { type: 'activity'; event: AiActivity } | { type: 'usage'; usage: AiRequestUsage } | { type: 'done'; artifact: TopicArtifact } | { type: 'error'; message: string }>) => {
         if (event.data.type === 'progress') { aiProgress.value = event.data.message; aiCompleted.value = event.data.completed; aiTotal.value = event.data.total; }
+        else if (event.data.type === 'activity') {
+          const entries = aiActivity.value;
+          aiActivity.value = entries.length < 250 ? [...entries, event.data.event] : [entries[0], ...entries.slice(-248), event.data.event];
+        }
         else if (event.data.type === 'usage') {
           usageWrites.push(recordAiUsage({ ...event.data.usage, id: crypto.randomUUID(), projectId: selected.projectId,
             projectName: project.value?.name ?? 'Unknown project', reviewId: selected.id, createdAt: Date.now(),
@@ -346,8 +355,13 @@ async function generateAiReview() {
     reviewView.value = 'topics';
     note(usageSaveFailed ? 'AI topics are ready, but usage details could not be saved.' : 'AI topics are ready. Review each topic against the diff.', usageSaveFailed);
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') note('AI review canceled.');
-    else note(`AI review failed: ${error instanceof Error ? error.message : String(error)}${usageSaveFailed ? ' Usage details could not be saved.' : ''}`, true);
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      aiActivity.value = [...aiActivity.value, { id: (aiActivity.value.at(-1)?.id ?? 0) + 1, at: Date.now(), kind: 'canceled', title: language.value === 'zh-CN' ? '生成已取消' : 'Generation canceled' }];
+      note('AI review canceled.');
+    } else {
+      if (aiActivity.value.at(-1)?.kind !== 'error') aiActivity.value = [...aiActivity.value, { id: (aiActivity.value.at(-1)?.id ?? 0) + 1, at: Date.now(), kind: 'error', title: language.value === 'zh-CN' ? '生成失败' : 'Generation failed', detail: error instanceof Error ? error.message : String(error) }];
+      note(`AI review failed: ${error instanceof Error ? error.message : String(error)}${usageSaveFailed ? ' Usage details could not be saved.' : ''}`, true);
+    }
   } finally { worker.terminate(); cancelAiReview = null; aiBusy.value = false; resumeLiveReview(); }
 }
 async function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
@@ -397,7 +411,7 @@ onUnmounted(() => { window.removeEventListener('ming:reviews-changed', onLiveRev
     <div v-if="!project" class="empty-state"><h3>Project not found</h3><p>Select a project from the Projects page.</p><button class="button-outline" @click="navigate({ kind: 'home' })">Projects</button></div>
     <div v-else-if="permissionRequired" class="empty-state"><h3>Project access required</h3><p>Grant read access to open this project. Ming will not modify its files.</p><button class="button-primary" @click="applyRoute(true)">Grant access</button></div>
     <FilesView v-else-if="view === 'files'" :project="project" :git-info="gitInfo" :path="filePath" :data="fileView?.data ?? null" :busy="filesBusy" :error="filesError" :settings="settings" @navigate="selectFilePath" @refresh="refreshFiles" />
-    <ReviewsView v-else-if="view === 'reviews'" :key="`${activeReviewId ?? 'empty'}:${record?.createdAt ?? ''}`" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
+    <ReviewsView v-else-if="view === 'reviews'" :key="`${activeReviewId ?? 'empty'}:${record?.createdAt ?? ''}`" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="aiBusy && activeReviewId === aiActivityReviewId" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-activity="activeReviewId === aiActivityReviewId ? aiActivity : []" :ai-configured="!!settings.copilotDeepSeekApiKey.trim()" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="generateAiReview" @cancel-ai-review="cancelAi" @mark-topic="markTopic" @retry-commits="loadCommits" @dismiss-message="message = ''" />
     <BranchesView v-else-if="view === 'branches'" :git-info="gitInfo" />
     <ProjectSettingsView v-else :project="project" :git-info="gitInfo" @save="saveProjectSettings" @remove="removeProject" />
     <template #toast><div v-if="!project && message" class="toast" :class="{ error: messageError }" role="status">{{ message }}<button aria-label="Dismiss message" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>

@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { markdownSnapshotForHunks, renderMarkdownRichDiff } from '../src/lib/markdownRichDiff';
-import { renderMarkdownDocument, renderMarkdownInline } from '../src/lib/markdownDocument';
+import { renderMarkdownDocument, renderMarkdownInline, renderTopicSummary } from '../src/lib/markdownDocument';
 
 const rich = renderMarkdownRichDiff({
   before: '# Guide\n\nOld paragraph.\n',
@@ -44,4 +44,9 @@ assert.match(document, /<table>/);
 assert.doesNotMatch(renderMarkdownDocument('<script>alert(1)</script><a href="javascript:alert(1)">bad</a>'), /<script|href="javascript:/);
 assert.match(renderMarkdownInline('Check `npm run build` and **routing**.'), /<code>npm run build<\/code>.*<strong>routing<\/strong>/);
 assert.doesNotMatch(renderMarkdownInline('<img src="https://example.com/x" onerror="alert(1)"> [bad](javascript:alert(1))'), /<img|href="javascript:/);
+assert.match(renderTopicSummary('- Main behavior changes.\n- Tests cover the new path.'), /<ul>\s*<li>Main behavior changes\.<\/li>\s*<li>Tests cover the new path\.<\/li>\s*<\/ul>/);
+const legacySummary = `修改核心行为。数据层：${'状态字段。'.repeat(60)}逻辑层：调用新工具；测试层：新增测试。`;
+assert.match(renderTopicSummary(legacySummary), /<p>修改核心行为。<\/p>\s*<p>数据层：/);
+assert.match(renderTopicSummary(legacySummary), /<p>逻辑层：调用新工具；<\/p>/);
+assert.doesNotMatch(renderTopicSummary('- <script>alert(1)</script>'), /<script>/);
 console.log('Markdown rich diff test passed');

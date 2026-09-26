@@ -11,6 +11,18 @@ export function renderMarkdownInline(source: string): string {
   });
 }
 
+export function renderTopicSummary(source: string): string {
+  let content = source.trim();
+  if (content.length > 240 && !content.includes('\n')) {
+    content = content.replace(/([^\n])(?=(?:数据层|逻辑层|测试层|界面层|调用层)[:：])/g, '$1\n\n')
+      .replace(/([；;])\s*/g, '$1\n\n');
+  }
+  return sanitizeHtml(inlineMarkdown.render(content), {
+    allowedTags: ['p', 'ul', 'ol', 'li', 'br', 'code', 'em', 's', 'strong'],
+    allowedAttributes: {},
+  });
+}
+
 export function sanitizeMarkdownHtml(html: string, localImagesOnly = false): string {
   return sanitizeHtml(html, {
     allowedTags: [...sanitizeHtml.defaults.allowedTags, 'img'],

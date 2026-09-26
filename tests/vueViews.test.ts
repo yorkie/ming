@@ -13,6 +13,7 @@ try {
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
   const { default: ReviewTreeNode } = await server.ssrLoadModule('/src/components/ReviewTreeNode.vue');
   const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
+  const { default: AiGenerationProgress } = await server.ssrLoadModule('/src/components/AiGenerationProgress.vue');
   const { default: ProjectSettingsView } = await server.ssrLoadModule('/src/components/ProjectSettingsView.vue');
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
   const projectSettingsHtml = await renderToString(createSSRApp(ProjectSettingsView, { project, gitInfo: null }));
@@ -29,6 +30,35 @@ try {
 
   const data: Review = { files: [{ path: 'src/main.ts', status: 'modified', additions: 1, deletions: 0, hunks: [{ header: '@@ -0,0 +1 @@', lines: [{ kind: 'add', text: 'const value = 1;', oldNumber: null, newNumber: 1 }] }] }], additions: 1, deletions: 0 };
   const record: ReviewRecord = { id: 'review-1', projectId: project.id, createdAt: 1, branch: 'main', baseRef: 'HEAD', data: JSON.stringify(data) };
+  const activityHtml = await renderToString(createSSRApp(AiGenerationProgress, { busy: true, progress: 'Reading changes', completed: 1, total: 2,
+    activity: [{ id: 1, at: Date.now() - 330_000, kind: 'tool', title: 'Read changes', detail: 'src/main.ts <script>' }] }));
+  assert.match(activityHtml, /Show work log/);
+  assert.match(activityHtml, /Working for 5m 30s/);
+  assert.match(activityHtml, /Read changes/);
+  assert.match(activityHtml, /src\/main\.ts &lt;script&gt;/);
+  assert.doesNotMatch(activityHtml, /src\/main\.ts <script>/);
+  assert.match(activityHtml, /Show 1 tool call/);
+  assert.match(activityHtml, /role="progressbar"[^>]*aria-valuenow="1"/);
+  assert.match(activityHtml, /class="ai-progress-fill" style="width:50%;"/);
+  assert.doesNotMatch(activityHtml, /<details class="ai-activity" open/);
+  const startingActivityHtml = await renderToString(createSSRApp(AiGenerationProgress, { busy: true, completed: 0, total: 2 }));
+  assert.match(startingActivityHtml, /ai-progress-track is-indeterminate/);
+  assert.doesNotMatch(startingActivityHtml, /aria-valuenow/);
+  const noReviewProgressHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [], record: null, data: null, reviewView: 'topics', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: true, aiProgress: 'Reading changes', aiCompleted: 1, aiTotal: 2, aiConfigured: true,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(noReviewProgressHtml, /ai-review-progress/);
+  assert.match(noReviewProgressHtml, /role="progressbar"[^>]*aria-valuenow="1"/);
+  const finishedActivityHtml = await renderToString(createSSRApp(AiGenerationProgress, { busy: false,
+    activity: [{ id: 2, at: 1_700_000_000_000, kind: 'done', title: 'Topic generation complete' }] }));
+  assert.match(finishedActivityHtml, /Change topics are ready/);
+  assert.match(finishedActivityHtml, /Worked for 0s/);
+  assert.match(finishedActivityHtml, /Work log/);
+  assert.doesNotMatch(finishedActivityHtml, /Work in progress/);
+  assert.doesNotMatch(finishedActivityHtml, /role="progressbar"/);
+  assert.doesNotMatch(finishedActivityHtml, /<button/);
   const reviewsHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [record], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
     scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
@@ -78,6 +108,18 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  const structuredTopicRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, artifact: {
+    ...topicRecord.aiReview!.artifact, topics: [{ ...topicRecord.aiReview!.artifact.topics[0], summary: '- Explain the behavior.\n- Cover the test path.' }],
+  } } };
+  const structuredTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: structuredTopicRecord, data, settings: defaultGlobalSettings }));
+  assert.match(structuredTopicHtml, /class="topic-summary"[^>]*><ul>/);
+  assert.match(structuredTopicHtml, /<li>Cover the test path\.<\/li>/);
+  const longTopicRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, artifact: {
+    ...topicRecord.aiReview!.artifact, topics: [{ ...topicRecord.aiReview!.artifact.topics[0], summary: `Purpose. ${'Detailed change. '.repeat(30)}` }],
+  } } };
+  const longTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: longTopicRecord, data, settings: defaultGlobalSettings }));
+  assert.match(longTopicHtml, /class="[^"]*is-collapsed[^"]*topic-summary"/);
+  assert.match(longTopicHtml, /Show full summary/);
   const reviewedTopicRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, reviewed: { 'topic-1': 'reviewed' } } };
   const reviewedTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: reviewedTopicRecord, data, settings: defaultGlobalSettings }));
   assert.match(reviewedTopicHtml, /class="[^"]*reviewed[^"]*topic-list-item"/);
@@ -147,7 +189,7 @@ try {
     aiBusy: true, aiProgress: 'Analyzing group 2 of 3', aiCompleted: 1, aiTotal: 3,
   }));
   assert.match(generatingHtml, /Analyzing group 2 of 3/);
-  assert.match(generatingHtml, /<progress/);
+  assert.match(generatingHtml, /role="progressbar"/);
   assert.match(generatingHtml, /Update main/);
   assert.match(generatingHtml, /src\/main\.ts/);
   const generatingReviewHtml = await renderToString(createSSRApp(ReviewsView, {

@@ -4,11 +4,13 @@ import { topicsAreStale, type Project, type ReviewRecord } from '../lib/projectS
 import type { GlobalSettings } from '../lib/globalSettings';
 import type { Review } from '../lib/reviewTypes';
 import type { Topic } from '../lib/aiReviewTypes';
-import { renderMarkdownInline } from '../lib/markdownDocument';
+import { renderMarkdownInline, renderTopicSummary } from '../lib/markdownDocument';
 import DiffFile from './DiffFile.vue';
+import AiGenerationProgress from './AiGenerationProgress.vue';
+import type { AiActivity } from '../lib/aiActivity';
 import { language, t } from '../lib/i18n';
 
-const props = defineProps<{ project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; aiBusy?: boolean; aiProgress?: string; aiCompleted?: number; aiTotal?: number }>();
+const props = defineProps<{ project: Project; record: ReviewRecord; data: Review; settings: GlobalSettings; aiBusy?: boolean; aiProgress?: string; aiCompleted?: number; aiTotal?: number; aiActivity?: AiActivity[] }>();
 const emit = defineEmits<{ markTopic: [id: string, status: 'reviewed' | 'needs-work' | null]; generateAiReview: []; cancelAiReview: [] }>();
 const topics = computed(() => props.record.aiReview?.artifact.topics ?? []);
 const stale = computed(() => topicsAreStale(props.record));
@@ -21,6 +23,8 @@ const reviewRoot = ref<HTMLElement | null>(null);
 const activeId = ref(topics.value[0]?.id ?? '');
 watch(topics, value => { if (!value.some(topic => topic.id === activeId.value)) activeId.value = value[0]?.id ?? ''; });
 const activeTopic = computed(() => topics.value.find(topic => topic.id === activeId.value) ?? null);
+const summaryExpanded = ref(false);
+watch(activeId, () => { summaryExpanded.value = false; });
 const originalActions = ref<HTMLElement | null>(null);
 const showFloatingActions = ref(false);
 function updateFloatingActions() {
@@ -66,9 +70,9 @@ async function selectTopic(id: string) {
 </script>
 
 <template>
-  <div ref="reviewRoot" class="topic-review" :class="{ 'is-stale': stale }"><div v-if="aiBusy" class="topic-stale-notice topic-generation-progress" role="status"><div class="topic-generation-heading"><i class="bi bi-arrow-repeat icon-spin" aria-hidden="true"></i><strong>{{ t('Generating AI topics') }}</strong><button type="button" class="button-outline" @click="emit('cancelAiReview')">{{ t('Cancel') }}</button></div><p>{{ aiProgress }}</p><progress :value="aiTotal ? aiCompleted : undefined" :max="aiTotal || undefined" :aria-label="t('Generating AI topics')"></progress></div><button v-else-if="stale" type="button" class="topic-stale-notice topic-stale-action" @click="emit('generateAiReview')"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i><span><strong>{{ t('Topics are out of date') }}</strong><span>{{ t('The diff changed after these topics were generated. Regenerate topics, then review them again. The topics below refer to the previous diff.') }}</span></span><span class="topic-stale-link">{{ t('Regenerate topics') }} <i class="bi bi-arrow-right" aria-hidden="true"></i></span></button><aside class="topic-list" :aria-label="t('Review topics')"><div class="topic-list-heading"><strong>{{ t('Review topics') }}</strong><span>{{ stale ? t('Out of date') : language === 'zh-CN' ? `${completed} / ${topics.length} 已评审` : `${completed} / ${topics.length} reviewed` }}</span></div><button v-for="(topic, index) in topics" :key="topic.id" type="button" class="topic-list-item" :class="{ active: activeId === topic.id, reviewed: status(topic) === 'reviewed' }" @click="selectTopic(topic.id)"><span class="topic-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ topic.title }}</strong><small>{{ language === 'zh-CN' ? `${topic.unitIds.length} 处改动` : `${topic.unitIds.length} change ${topic.unitIds.length === 1 ? 'range' : 'ranges'}` }} · <span class="topic-status">{{ t(stale ? 'Out of date' : status(topic) === 'reviewed' ? 'Reviewed' : status(topic) === 'needs-work' ? 'Needs another look' : 'To review') }}</span></small></span></button></aside>
+  <div ref="reviewRoot" class="topic-review" :class="{ 'is-stale': stale }"><AiGenerationProgress v-if="aiBusy || aiActivity?.length" class="topic-stale-notice" :busy="aiBusy" :progress="aiProgress" :completed="aiCompleted" :total="aiTotal" :activity="aiActivity" @cancel="emit('cancelAiReview')" /><button v-if="!aiBusy && stale" type="button" class="topic-stale-notice topic-stale-action" @click="emit('generateAiReview')"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i><span><strong>{{ t('Topics are out of date') }}</strong><span>{{ t('The diff changed after these topics were generated. Regenerate topics, then review them again. The topics below refer to the previous diff.') }}</span></span><span class="topic-stale-link">{{ t('Regenerate topics') }} <i class="bi bi-arrow-right" aria-hidden="true"></i></span></button><aside class="topic-list" :aria-label="t('Review topics')"><div class="topic-list-heading"><strong>{{ t('Review topics') }}</strong><span>{{ stale ? t('Out of date') : language === 'zh-CN' ? `${completed} / ${topics.length} 已评审` : `${completed} / ${topics.length} reviewed` }}</span></div><button v-for="(topic, index) in topics" :key="topic.id" type="button" class="topic-list-item" :class="{ active: activeId === topic.id, reviewed: status(topic) === 'reviewed' }" @click="selectTopic(topic.id)"><span class="topic-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ topic.title }}</strong><small>{{ language === 'zh-CN' ? `${topic.unitIds.length} 处改动` : `${topic.unitIds.length} change ${topic.unitIds.length === 1 ? 'range' : 'ranges'}` }} · <span class="topic-status">{{ t(stale ? 'Out of date' : status(topic) === 'reviewed' ? 'Reviewed' : status(topic) === 'needs-work' ? 'Needs another look' : 'To review') }}</span></small></span></button></aside>
     <section v-if="activeTopic" class="topic-detail">
-      <div class="topic-detail-heading"><span class="minor-heading">{{ t(activeTopic.id === 'uncategorized' ? 'UNASSIGNED CHANGE RANGES' : 'AI-ORGANIZED TOPIC · CHECK THE DIFF') }}</span><h3>{{ activeTopic.title }}</h3><p v-html="renderMarkdownInline(activeTopic.summary)"></p></div>
+      <div class="topic-detail-heading"><span class="minor-heading">{{ t(activeTopic.id === 'uncategorized' ? 'UNASSIGNED CHANGE RANGES' : 'AI-ORGANIZED TOPIC · CHECK THE DIFF') }}</span><h3>{{ activeTopic.title }}</h3><h4 class="topic-summary-heading">{{ language === 'zh-CN' ? '改动概要' : 'Summary' }}</h4><div class="topic-summary" :class="{ 'is-collapsed': activeTopic.summary.length > 320 && !summaryExpanded }" v-html="renderTopicSummary(activeTopic.summary)"></div><button v-if="activeTopic.summary.length > 320" type="button" class="topic-summary-toggle" :aria-expanded="summaryExpanded" @click="summaryExpanded = !summaryExpanded">{{ language === 'zh-CN' ? summaryExpanded ? '收起详细说明' : '展开详细说明' : summaryExpanded ? 'Show less' : 'Show full summary' }}</button></div>
       <div class="topic-checks">
         <div ref="originalActions" class="topic-checks-heading">
           <strong>{{ t(activeTopic.checks.length ? 'What to check' : 'Review status') }}</strong>

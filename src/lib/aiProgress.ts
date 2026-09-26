@@ -29,7 +29,11 @@ export function localizeAiProgress(message: string, language: Language): string 
     if (action === 'response received; validating result…') return `${label} · 已收到响应，正在验证结果…`;
   }
 
-  const validated = /^Validated group (\d+) of (\d+)\. (Combining topics…|Preparing the next group…)$/.exec(message);
-  if (validated) return `已验证第 ${validated[1]}/${validated[2]} 组。${validated[3] === 'Combining topics…' ? '正在合并主题…' : '正在准备下一组…'}`;
+  const validated = /^Validated group (\d+) of (\d+)\. (Combining topics…|Reconciling topics across groups…|Preparing the next group…|Finishing topic review…)$/.exec(message);
+  if (validated) return `已验证第 ${validated[1]}/${validated[2]} 组。${validated[3] === 'Preparing the next group…' ? '正在准备下一组…' : validated[3] === 'Combining topics…' ? '正在合并主题…' : validated[3] === 'Finishing topic review…' ? '正在完成主题评审…' : '正在全局整理主题…'}`;
+  const globalRequest = /^Reconciling topics · request (\d+)…$/.exec(message);
+  if (globalRequest) return `正在全局整理主题 · 第 ${globalRequest[1]} 次请求…`;
+  const globalWaiting = /^Reconciling topics · waiting \((\d+)s\)…$/.exec(message);
+  if (globalWaiting) return `正在全局整理主题 · 已等待 ${globalWaiting[1]} 秒…`;
   return message;
 }
