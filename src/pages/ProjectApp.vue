@@ -15,6 +15,7 @@ import { language, t } from '../lib/i18n';
 import { localizeAiProgress } from '../lib/aiProgress';
 import type { AiActivity } from '../lib/aiActivity';
 import { pauseLiveReview, pauseLiveReviewForScan } from '../lib/liveReviews';
+import { parseGitHubRepository } from '../lib/githubRepository';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
 type ReviewView = 'topics' | 'changes' | 'commits';
@@ -287,11 +288,13 @@ async function addProject() {
   try { const selected = await addLocalProject(projects.value); if (!projects.value.some(item => item.id === selected.id)) projects.value = [...projects.value, selected]; navigate({ kind: 'project', projectId: selected.id, page: 'files' }); }
   catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; note(error instanceof Error ? error.message : String(error), true); }
 }
-async function saveProjectSettings(name: string, baseRef: string, liveReview: boolean) {
+async function saveProjectSettings(name: string, baseRef: string, liveReview: boolean, githubRepository: string) {
   const selected = project.value;
   if (!selected) return;
   if (!name) return note('Project name cannot be empty.', true);
-  selected.name = name; selected.settings = { baseRef, liveReview };
+  const repository = githubRepository ? parseGitHubRepository(githubRepository) : null;
+  if (githubRepository && !repository) return note(t('Enter a GitHub repository as owner/repo or a GitHub URL.'), true);
+  selected.name = name; selected.settings = { baseRef, liveReview, githubRepository: repository ? `${repository.owner}/${repository.repo}` : undefined };
   try { await rememberProject(selected); projects.value = [...projects.value]; window.dispatchEvent(new Event('ming:settings-changed')); note('Project settings saved in this browser.'); }
   catch (error) { note(error instanceof Error ? error.message : String(error), true); }
 }

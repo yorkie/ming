@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, open, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { inspectRepository, readCommitHistory, readEntryCommits, readLocalRepository, readMarkdownSnapshot, resolveComparisonOid, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
+import { inspectRepository, listGitHubRemotes, readCommitHistory, readEntryCommits, readLocalRepository, readMarkdownSnapshot, resolveComparisonOid, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
 
 function directory(path: string): FileSystemDirectoryHandle {
   return {
@@ -92,6 +92,10 @@ try {
   assert.equal(await resolveComparisonOid(directory(root), 'HEAD'), baselineOid);
   assert.equal(info.latestCommit?.oid, baselineOid);
   assert.equal(info.latestCommit?.title, 'baseline');
+  run('remote', 'add', 'origin', 'git@github.com:octocat/Hello-World.git');
+  assert.deepEqual(await listGitHubRemotes(directory(root)), [{ remote: 'origin', repository: {
+    owner: 'octocat', repo: 'Hello-World', url: 'https://github.com/octocat/Hello-World',
+  } }]);
   await assert.rejects(resolveComparisonRef(directory(root), 'HEAD', info.currentBranch), /No local remote-tracking ref/);
   assert.equal(await resolveComparisonRef(directory(root), 'HEAD', null), 'HEAD');
   assert.equal(await resolveComparisonRef(directory(root), 'some-ref', info.currentBranch), 'some-ref');

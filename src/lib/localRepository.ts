@@ -5,6 +5,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { sha1 } from '@noble/hashes/legacy.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { PackedGitObjects } from './packedGitObjects';
+import { parseGitHubRepository, type GitHubRepository } from './githubRepository';
 
 // isomorphic-git expects Node-style buffers and a small fs.promises interface.
 Object.assign(globalThis, { Buffer });
@@ -203,6 +204,17 @@ export async function validateGitRepository(root: FileSystemDirectoryHandle): Pr
 }
 
 export type RepositoryInfo = { currentBranch: string | null; branches: string[]; headOid: string | null; latestCommit: CommitSummary | null };
+
+export async function listGitHubRemotes(root: FileSystemDirectoryHandle): Promise<Array<{ remote: string; repository: GitHubRepository }>> {
+  await validateGitRepository(root);
+  const fs = new BrowserRepositoryFs(root);
+  const gitFs = fs as unknown as Parameters<typeof git.listRemotes>[0]['fs'];
+  const remotes = await git.listRemotes({ fs: gitFs, dir: '/' });
+  return remotes.flatMap(({ remote, url }) => {
+    const repository = parseGitHubRepository(url);
+    return repository ? [{ remote, repository }] : [];
+  });
+}
 
 export async function inspectRepository(root: FileSystemDirectoryHandle): Promise<RepositoryInfo> {
   await validateGitRepository(root);

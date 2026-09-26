@@ -1,5 +1,5 @@
 import type { ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
-export type ProjectSettings = { baseRef: string; liveReview?: boolean };
+export type ProjectSettings = { baseRef: string; liveReview?: boolean; githubRepository?: string };
 export type Project = {
   id: string;
   name: string;

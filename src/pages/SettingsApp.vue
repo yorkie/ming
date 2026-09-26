@@ -21,6 +21,7 @@ const ready = ref(false);
 const message = ref('');
 const messageError = ref(false);
 const showDeepSeekKey = ref(false);
+const showGitHubToken = ref(false);
 const fontSizes = [12, 13, 14, 15, 16].map(value => ({ value: String(value), label: `${value} px` }));
 const lineHeights = [20, 24, 28, 32].map(value => ({ value: String(value), label: `${value} px` }));
 const previewLimits = [['100', '100 KB'], ['500', '500 KB'], ['1000', '1 MB'], ['2000', '2 MB']].map(([value, label]) => ({ value, label }));
@@ -67,8 +68,8 @@ onMounted(async () => {
       <AiUsageView v-if="section === 'usage'" :projects="projects" />
       <form v-else class="global-settings-form" @submit.prevent="save">
         <section class="global-settings-section"><div class="global-settings-section-heading">
-          <h3>{{ t({ appearance: 'Appearance', files: 'File browsing', reviews: 'Reviews', copilot: 'Copilot' }[section]) }}</h3>
-          <p>{{ t({ appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Configure DeepSeek for review titles and topics.' }[section]) }}</p>
+          <h3>{{ t({ appearance: 'Appearance', files: 'File browsing', reviews: 'Reviews', copilot: 'Copilot', github: 'GitHub' }[section]) }}</h3>
+          <p>{{ t({ appearance: 'Choose how code appears in file previews and reviews.', files: 'Control how repository files are previewed.', reviews: 'Choose how saved reviews open.', copilot: 'Configure DeepSeek for review titles and topics.', github: 'Save your own GitHub token for linked repositories.' }[section]) }}</p>
         </div>
           <template v-if="section === 'appearance'">
             <div class="setting-row"><label><strong>{{ t('Show Demo Project') }}</strong><span>{{ t('Show the sample project on Home until you add a local repository') }}</span></label><ToggleSwitch v-model="draft.showDemoProject" :label="t('Show Demo Project')" /></div>
@@ -86,13 +87,16 @@ onMounted(async () => {
             <div class="setting-row"><label><strong>{{ t('Local change detection') }}</strong><span>{{ t('Use file notifications when available, or check on a timer') }}</span></label><ChoiceSelect :model-value="draft.fileChangeDetection" :options="[{ value: 'observer', label: t('Observer with timer fallback') }, { value: 'timer', label: t('Timer only') }]" :label="t('Local change detection')" @update:model-value="draft.fileChangeDetection = $event as typeof draft.fileChangeDetection" /></div>
             <div class="setting-row"><label><strong>{{ t('Default tab') }}</strong><span>{{ t('Tab shown after scanning changes') }}</span></label><ChoiceSelect :model-value="draft.defaultReviewTab" :options="reviewTabs.map(item => ({ ...item, label: t(item.label) }))" :label="t('Default tab')" @update:model-value="draft.defaultReviewTab = $event as typeof draft.defaultReviewTab" /></div>
             <div class="setting-row"><label><strong>{{ t('Expand file diffs') }}</strong><span>{{ t('Open changed files when a review is selected') }}</span></label><ToggleSwitch v-model="draft.expandDiffs" :label="t('Expand file diffs')" /></div>
-            <div class="setting-row"><label><strong>{{ t('Rich Markdown diff') }}</strong><span>{{ t('Open Markdown changes in rendered view when available') }}</span></label><ToggleSwitch v-model="draft.richMarkdownByDefault" :label="t('Rich Markdown diff')" /></div>
           </template>
-          <template v-else>
+          <template v-else-if="section === 'copilot'">
             <div class="setting-row"><label for="copilot-deepseek-key"><strong>{{ t('DeepSeek API key') }}</strong><span>{{ t('Saved in this browser with your Copilot settings') }}</span></label><div class="secret-input"><input id="copilot-deepseek-key" v-model="draft.copilotDeepSeekApiKey" :type="showDeepSeekKey ? 'text' : 'password'" autocomplete="off" :placeholder="t('Enter DeepSeek API key')" maxlength="500"><button type="button" :aria-label="t(showDeepSeekKey ? 'Hide DeepSeek API key' : 'Show DeepSeek API key')" :aria-pressed="showDeepSeekKey" @click="showDeepSeekKey = !showDeepSeekKey"><i :class="showDeepSeekKey ? 'bi bi-eye-slash' : 'bi bi-eye'" aria-hidden="true"></i></button></div></div>
             <div v-if="draft.copilotDeepSeekApiKey.trim()" class="setting-row"><label><strong>{{ t('Model') }}</strong><span>{{ t('DeepSeek model for review titles and topics') }}</span></label><ChoiceSelect :model-value="draft.copilotModel" :options="deepSeekModels" :label="t('Model')" @update:model-value="draft.copilotModel = $event as typeof draft.copilotModel" /></div>
             <div class="setting-row"><label><strong>{{ t('Summary language') }}</strong><span>{{ t('Language for topic titles and summaries') }}</span></label><ChoiceSelect :model-value="draft.copilotSummaryLanguage" :options="languages" :label="t('Summary language')" @update:model-value="draft.copilotSummaryLanguage = $event as typeof draft.copilotSummaryLanguage" /></div>
             <div class="setting-row"><label><strong>{{ t('Review language') }}</strong><span>{{ t('Language for review guidance, comments and conclusions') }}</span></label><ChoiceSelect :model-value="draft.copilotReviewLanguage" :options="languages" :label="t('Review language')" @update:model-value="draft.copilotReviewLanguage = $event as typeof draft.copilotReviewLanguage" /></div>
+          </template>
+          <template v-else>
+            <div class="setting-row"><label for="github-token"><strong>{{ t('GitHub personal access token') }}</strong><span>{{ t('Stored only in this browser. Select your repositories and grant Pull requests read permission.') }}</span></label><div class="secret-input"><input id="github-token" v-model="draft.githubPersonalAccessToken" :type="showGitHubToken ? 'text' : 'password'" autocomplete="off" :placeholder="t('Enter GitHub token')" maxlength="500"><button type="button" :aria-label="t(showGitHubToken ? 'Hide GitHub token' : 'Show GitHub token')" :aria-pressed="showGitHubToken" @click="showGitHubToken = !showGitHubToken"><i :class="showGitHubToken ? 'bi bi-eye-slash' : 'bi bi-eye'" aria-hidden="true"></i></button></div></div>
+            <div class="setting-row"><label><strong>{{ t('Token access') }}</strong><span>{{ t('Create a fine-grained token for the repositories you want to link.') }}</span></label><div class="github-token-actions"><a class="button-outline" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">{{ t('Create token on GitHub') }} <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a></div></div>
           </template>
         </section>
         <div class="global-settings-actions"><button type="submit" class="button-primary">{{ t('Save settings') }}</button></div>

@@ -10,11 +10,11 @@ export type GlobalSettings = {
   defaultReviewTab: 'topics' | 'changes' | 'commits';
   fileChangeDetection: 'observer' | 'timer';
   expandDiffs: boolean;
-  richMarkdownByDefault: boolean;
   copilotModel: 'deepseek-flash' | 'deepseek-v4-pro';
   copilotSummaryLanguage: 'en' | 'zh-CN';
   copilotReviewLanguage: 'en' | 'zh-CN';
   copilotDeepSeekApiKey: string;
+  githubPersonalAccessToken: string;
 };
 
 const STORAGE_KEY = 'ming-global-settings-v2';
@@ -26,8 +26,9 @@ export const defaultGlobalSettings: GlobalSettings = {
   codeFontSize: 13, codeLineHeight: 24,
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
-  defaultReviewTab: 'topics', fileChangeDetection: 'observer', expandDiffs: true, richMarkdownByDefault: false,
+  defaultReviewTab: 'topics', fileChangeDetection: 'observer', expandDiffs: true,
   copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '', copilotSummaryLanguage: 'en', copilotReviewLanguage: 'en',
+  githubPersonalAccessToken: '',
 };
 
 export function parseGlobalSettings(value: string | null): GlobalSettings {
@@ -51,11 +52,11 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
       defaultReviewTab: choice(settings.defaultReviewTab, ['topics', 'changes', 'commits'], defaultGlobalSettings.defaultReviewTab),
       fileChangeDetection: choice(settings.fileChangeDetection, ['observer', 'timer'], 'observer'),
       expandDiffs: flag(settings.expandDiffs, true),
-      richMarkdownByDefault: flag(settings.richMarkdownByDefault, false),
       copilotModel: choice(settings.copilotModel, ['deepseek-flash', 'deepseek-v4-pro'], defaultGlobalSettings.copilotModel),
       copilotSummaryLanguage: choice(settings.copilotSummaryLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotSummaryLanguage),
       copilotReviewLanguage: choice(settings.copilotReviewLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotReviewLanguage),
       copilotDeepSeekApiKey: shortText(settings.copilotDeepSeekApiKey, 500),
+      githubPersonalAccessToken: shortText(settings.githubPersonalAccessToken, 500),
     };
   } catch { return { ...defaultGlobalSettings }; }
 }

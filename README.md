@@ -25,6 +25,12 @@ Open [Ming](https://yorkie.github.io/ming/) in a current Chromium-based browser.
 3. Inspect **Changes** and **Commits**. To use **Topics**, add a DeepSeek API key in **MING Console → Copilot**, then click **Generate AI topics**. Topic generation is manual.
 4. Review each topic against its diff and mark it reviewed or needing another look. If the diff changes, Ming keeps the previous topics visible and marks them out of date until you regenerate them.
 
+### Link a GitHub repository
+
+In **Project settings**, choose a GitHub repository from the local project's Git remotes. In **MING Console → GitHub**, you can save your own [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with access to that repository and **Pull requests: Read-only** permission.
+
+The token is stored in this browser's local storage. The current configuration does not make GitHub API requests. Ming does not require a GitHub App or its own authentication server. Keep the token limited to the repositories you need and remove it from MING Console when no longer needed.
+
 ### When to use Ming
 
 **After an AI coding pass:** Scan the working tree, inspect the changed files, then generate topics to review related edits together. Every topic links back to the code you need to verify.
@@ -49,7 +55,7 @@ Ming makes no Git fetch, push, commit, checkout, or repository-file changes. It 
 
 ### Privacy and AI requests
 
-The DeepSeek API key is stored in this browser's local storage. With a key configured, **scanning a changed diff automatically sends bounded diff context directly from the browser to DeepSeek to generate a review title**. **Topic generation sends the saved diff to DeepSeek only when you start or restart that task.** Ming does not upload repository content to a Ming server. Removing a project deletes its browser records, not its files on disk.
+The DeepSeek API key and optional GitHub personal access token are stored in this browser's local storage. With a DeepSeek key configured, **scanning a changed diff automatically sends bounded diff context directly from the browser to DeepSeek to generate a review title**. **Topic generation sends the saved diff to DeepSeek only when you start or restart that task.** GitHub settings do not currently send the token or repository files to GitHub. Ming does not upload repository content to a Ming server. Removing a project deletes its browser records, not its files on disk.
 
 ## Build and contribute
 

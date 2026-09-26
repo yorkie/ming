@@ -4,7 +4,7 @@ export type Route =
   | { kind: 'project'; projectId: string; page: 'files' | 'reviews' | 'branches' | 'settings'; path?: string }
   | { kind: 'review'; projectId: string; reviewId: string; page: 'topics' | 'changes' | 'commits' };
 
-export type GlobalSettingsSection = 'usage' | 'appearance' | 'files' | 'reviews' | 'copilot';
+export type GlobalSettingsSection = 'usage' | 'appearance' | 'files' | 'reviews' | 'copilot' | 'github';
 
 export function shortId(id: string, ids: string[]): string {
   let length = Math.min(8, id.length);
@@ -42,7 +42,7 @@ export function parseRoute(url: string): Route | null {
   if (pathname === '/console/' || pathname === '/console' || pathname === '/settings/' || pathname === '/settings') {
     const section = parsed.searchParams.get('section');
     if (!section) return { kind: 'global-settings' };
-    if (['usage', 'appearance', 'files', 'reviews', 'copilot'].includes(section)) return { kind: 'global-settings', section: section as GlobalSettingsSection };
+    if (['usage', 'appearance', 'files', 'reviews', 'copilot', 'github'].includes(section)) return { kind: 'global-settings', section: section as GlobalSettingsSection };
     return null;
   }
   if (pathname !== '/projects/' && pathname !== '/projects') return null;

@@ -44,7 +44,9 @@ export const demoReview: Review = {
       { kind: 'add', text: '  return Math.max(0, subtotal - safeDiscount);', oldNumber: null, newNumber: 4 },
       { kind: 'context', text: '}', oldNumber: 4, newNumber: 5 },
     ] }] },
-    { path: 'README.md', status: 'modified', additions: 2, deletions: 0, hunks: [{ header: '@@ -1 +1,3 @@', lines: [
+    { path: 'README.md', status: 'modified', additions: 2, deletions: 0,
+      markdown: { before: readme.replace('Discounts now have a floor of zero.\nCheck whether that matches your product rules.\n', ''), after: readme },
+      hunks: [{ header: '@@ -1 +1,3 @@', lines: [
       { kind: 'context', text: '# Welcome to the demo', oldNumber: 1, newNumber: 1 },
       { kind: 'add', text: 'Discounts now have a floor of zero.', oldNumber: null, newNumber: 2 },
       { kind: 'add', text: 'Check whether that matches your product rules.', oldNumber: null, newNumber: 3 },

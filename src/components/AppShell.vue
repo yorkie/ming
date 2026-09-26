@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
-import type { Project } from '../lib/projectStore';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { listReviews, type Project } from '../lib/projectStore';
 import type { GlobalSettingsSection } from '../lib/routes';
-import { t } from '../lib/i18n';
+import { language, t } from '../lib/i18n';
 import BackgroundTasks from './BackgroundTasks.vue';
 
 type Page = 'files' | 'reviews' | 'branches' | 'settings';
@@ -32,12 +32,59 @@ const pickerOpen = ref(false);
 const logoUrl = `${import.meta.env.BASE_URL}logo-header.png`;
 const picker = ref<HTMLElement | null>(null);
 const options = ref<HTMLButtonElement[]>([]);
+const reviewSummaries = ref<Record<string, { count: number; latestAt: number | null }>>({});
+const summariesLoaded = ref(false);
+const now = ref(Date.now());
+let summaryRequest = 0;
+let clock: ReturnType<typeof setInterval> | null = null;
+async function loadReviewSummaries() {
+  const request = ++summaryRequest;
+  summariesLoaded.value = false;
+  const results = await Promise.allSettled(props.projects.map(async project => {
+    const reviews = await listReviews(project.id);
+    return [project.id, { count: reviews.length, latestAt: reviews[0]?.createdAt ?? null }] as const;
+  }));
+  if (request !== summaryRequest || !pickerOpen.value) return;
+  reviewSummaries.value = Object.fromEntries(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+  summariesLoaded.value = true;
+}
+watch(pickerOpen, open => {
+  if (clock) clearInterval(clock);
+  clock = null;
+  if (open) {
+    now.value = Date.now();
+    void loadReviewSummaries();
+    clock = setInterval(() => { now.value = Date.now(); }, 60_000);
+  }
+});
+watch(() => props.projects, () => { if (pickerOpen.value) void loadReviewSummaries(); });
+function onReviewsChanged() { if (pickerOpen.value) void loadReviewSummaries(); }
+function relativeDate(value: number) {
+  const seconds = Math.max(0, Math.floor((now.value - value) / 1000));
+  if (seconds < 60) return language.value === 'zh-CN' ? '刚刚' : 'just now';
+  if (seconds < 3600) { const minutes = Math.floor(seconds / 60); return language.value === 'zh-CN' ? `${minutes} 分钟前` : `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`; }
+  if (seconds < 86_400) { const hours = Math.floor(seconds / 3600); return language.value === 'zh-CN' ? `${hours} 小时前` : `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`; }
+  const days = Math.floor(seconds / 86_400);
+  if (days < 30) return language.value === 'zh-CN' ? `${days} 天前` : `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  const months = Math.floor(days / 30);
+  if (days < 365) return language.value === 'zh-CN' ? `${months} 个月前` : `${months} ${months === 1 ? 'month' : 'months'} ago`;
+  const years = Math.floor(days / 365);
+  return language.value === 'zh-CN' ? `${years} 年前` : `${years} ${years === 1 ? 'year' : 'years'} ago`;
+}
+function reviewSummary(projectId: string) {
+  const summary = reviewSummaries.value[projectId];
+  if (!summary) return t(summariesLoaded.value ? 'Review info unavailable' : 'Loading reviews…');
+  if (summary.latestAt === null) return t('No reviews yet');
+  const count = language.value === 'zh-CN' ? `${summary.count} 条评审` : `${summary.count} ${summary.count === 1 ? 'review' : 'reviews'}`;
+  return `${count} · ${t('Last updated')} ${relativeDate(summary.latestAt)}`;
+}
 const categories: { id: GlobalSettingsSection; label: string; icon: string }[] = [
   { id: 'usage', label: 'AI usage', icon: 'bar-chart' },
   { id: 'appearance', label: 'Appearance', icon: 'palette' },
   { id: 'files', label: 'File browsing', icon: 'folder2-open' },
   { id: 'reviews', label: 'Reviews', icon: 'file-earmark-diff' },
   { id: 'copilot', label: 'Copilot', icon: 'robot' },
+  { id: 'github', label: 'GitHub', icon: 'github' },
 ];
 function chooseProject(id: string | null) { pickerOpen.value = false; emit('selectProject', id); }
 function pickerKey(event: KeyboardEvent) {
@@ -51,8 +98,8 @@ function pickerKey(event: KeyboardEvent) {
   options.value[next]?.focus();
 }
 function outside(event: PointerEvent) { if (picker.value && event.target instanceof Node && !picker.value.contains(event.target)) pickerOpen.value = false; }
-onMounted(() => document.addEventListener('pointerdown', outside));
-onUnmounted(() => document.removeEventListener('pointerdown', outside));
+onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('ming:reviews-changed', onReviewsChanged); });
+onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.removeEventListener('pointerdown', outside); window.removeEventListener('ming:reviews-changed', onReviewsChanged); });
 </script>
 
 <template>
@@ -65,7 +112,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
           <button id="project-picker-trigger" type="button" class="project-picker-trigger" :aria-label="t('Select a project')" aria-haspopup="true" :aria-expanded="pickerOpen" aria-controls="project-picker-menu" @click="pickerOpen = !pickerOpen"><span>{{ activeProject?.name ?? t('All projects') }}</span><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
           <nav v-show="pickerOpen" id="project-picker-menu" class="project-picker-menu" :aria-label="t('Projects')">
             <button ref="options" type="button" class="project-picker-option" :class="{ selected: !activeProject }" :aria-current="!activeProject" @click="chooseProject(null)"><span class="project-picker-option-name">{{ t('All projects') }}</span><i v-if="!activeProject" class="bi bi-check2" aria-hidden="true"></i></button>
-            <button v-for="project in projects" :key="project.id" ref="options" type="button" class="project-picker-option" :class="{ selected: activeProject?.id === project.id }" :aria-current="activeProject?.id === project.id" @click="chooseProject(project.id)"><span class="project-picker-option-name">{{ project.name }}</span><i v-if="activeProject?.id === project.id" class="bi bi-check2" aria-hidden="true"></i></button>
+            <div v-if="projects.length" class="project-picker-divider" role="separator"></div>
+            <button v-for="project in projects" :key="project.id" ref="options" type="button" class="project-picker-option project-picker-project" :class="{ selected: activeProject?.id === project.id }" :aria-current="activeProject?.id === project.id" @click="chooseProject(project.id)"><span class="project-picker-option-details"><span class="project-picker-option-name">{{ project.name }}</span><span class="project-picker-option-meta">{{ reviewSummary(project.id) }}</span></span><i v-if="activeProject?.id === project.id" class="bi bi-check2" aria-hidden="true"></i></button>
           </nav>
         </div>
         <button id="add-project-small" class="button-outline" :title="t('Add project')" @click="emit('addProject')"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button>

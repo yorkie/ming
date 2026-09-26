@@ -7,8 +7,20 @@ const rich = renderMarkdownRichDiff({
   after: '# Guide\n\nNew **paragraph**.\n',
 });
 assert.match(rich, /markdown-rich-block context"><h1>Guide<\/h1>/);
-assert.match(rich, /markdown-rich-block delete"><p>Old paragraph\.<\/p>/);
+assert.match(rich, /markdown-rich-block delete"><del><p>Old paragraph\.<\/p>\s*<\/del>/);
 assert.match(rich, /markdown-rich-block add"><p>New <strong>paragraph<\/strong>\.<\/p>/);
+assert.doesNotMatch(rich, /markdown-rich-block add"><del>/);
+assert.doesNotMatch(rich, /markdown-rich-omission/);
+
+const longBefore = ['# Guide', 'Intro one.', 'Intro two.', 'Intro three.', 'Old top.', 'Between one.', 'Between two.', 'Between three.', 'Between four.', 'Old bottom.', 'Tail one.', 'Tail two.', 'Tail three.'].join('\n\n');
+const longAfter = longBefore.replace('Old top.', 'New top.').replace('Old bottom.', 'New bottom.');
+const folded = renderMarkdownRichDiff({ before: longBefore, after: longAfter });
+assert.equal((folded.match(/class="markdown-rich-omission"/g) ?? []).length, 3);
+assert.match(folded, /<details class="markdown-rich-omission"><summary>Show unchanged sections \(3\)<\/summary>/);
+assert.match(folded, /markdown-rich-block add"><p>New top\.<\/p>/);
+assert.match(folded, /markdown-rich-block add"><p>New bottom\.<\/p>/);
+assert.match(folded, /markdown-rich-block context"><p>Between one\.<\/p>\s*<\/div><details class="markdown-rich-omission">/);
+assert.match(folded, /<\/details><div class="markdown-rich-block context"><p>Between four\.<\/p>/);
 
 const snapshot = { before: '# Guide\n\nOld first.\n\nSame.\n\nOld second.\n', after: '# Guide\n\nNew first.\n\nSame.\n\nNew second.\n' };
 const hunks = [

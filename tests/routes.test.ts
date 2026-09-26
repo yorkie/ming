@@ -9,6 +9,7 @@ const routes: Route[] = [
   { kind: 'global-settings', section: 'files' },
   { kind: 'global-settings', section: 'reviews' },
   { kind: 'global-settings', section: 'copilot' },
+  { kind: 'global-settings', section: 'github' },
   { kind: 'project', projectId: 'project 1', page: 'reviews' },
   { kind: 'project', projectId: 'project 1', page: 'files' },
   { kind: 'project', projectId: 'project 1', page: 'files', path: 'docs/Project guide #1.md' },
@@ -25,6 +26,7 @@ assert.deepEqual(parseRoute('/settings/'), { kind: 'global-settings' });
 assert.deepEqual(parseRoute('/projects/?id=project-1'), { kind: 'project', projectId: 'project-1', page: 'files' });
 assert.equal(parseRoute('/console/?section=unknown'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=unknown'), null);
+assert.equal(parseRoute('/projects/?id=project-1&page=github'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=files&review=review-1'), null);
 assert.equal(parseRoute('/projects/?id=project-1&page=reviews&review=review-1&tab=unknown'), null);
 assert.equal(parseRoute('#/projects/project-1'), null);

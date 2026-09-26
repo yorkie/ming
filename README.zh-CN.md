@@ -25,6 +25,12 @@ AI 生成的摘要告诉你它打算做什么；Ming 展示它实际改了什么
 3. 查看 **Changes** 和 **Commits**。如需使用 **Topics**，先在 **MING Console → Copilot** 配置 DeepSeek API 密钥，再点击 **Generate AI topics**。主题生成需要手动启动。
 4. 对照 diff 逐项评审主题，并标记为已评审或需要再看。diff 更新后，旧主题仍会显示，但会标记为过期，直到你重新生成。
 
+### 关联 GitHub 仓库
+
+在**项目设置**中，从本地项目的 Git 远端选择 GitHub 仓库。在 **MING Console → GitHub** 中可保存自己的[细粒度个人访问令牌](https://github.com/settings/personal-access-tokens/new)：令牌应能访问目标仓库，并具有 **Pull requests: Read-only** 权限。
+
+令牌保存在当前浏览器的 local storage。当前配置功能不会发起 GitHub API 请求。Ming 无需注册 GitHub App 或部署自己的授权服务。请将令牌限定在需要的仓库范围内，不再使用时可从 MING Console 清除。
+
 ### 适合这些场景
 
 **AI 刚完成一轮编码：** 扫描工作区、查看改动文件，再生成主题，集中评审相关修改。每个主题都能回到需要核查的代码。
@@ -49,7 +55,7 @@ Ming 不会执行 Git fetch、push、commit、checkout，也不会修改仓库�
 
 ### 隐私与 AI 请求
 
-DeepSeek API 密钥保存在当前浏览器的 local storage。配置密钥后，**扫描到变化的 diff 会自动将有界的差异上下文从浏览器直接发送给 DeepSeek，用于生成评审标题**。**只有你手动启动或重新启动主题任务时，已保存的 diff 才会发送给 DeepSeek 用于生成主题。** Ming 不会把仓库内容上传到 Ming 服务器。从 Ming 移除项目只会删除浏览器中的记录，不会删除磁盘上的仓库。
+DeepSeek API 密钥和可选的 GitHub 个人访问令牌保存在当前浏览器的 local storage。配置 DeepSeek 密钥后，**扫描到变化的 diff 会自动将有界的差异上下文从浏览器直接发送给 DeepSeek，用于生成评审标题**。**只有你手动启动或重新启动主题任务时，已保存的 diff 才会发送给 DeepSeek 用于生成主题。** 当前 GitHub 配置不会向 GitHub 发送令牌或仓库文件。Ming 不会把仓库内容上传到 Ming 服务器。从 Ming 移除项目只会删除浏览器中的记录，不会删除磁盘上的仓库。
 
 ## 构建与贡献
 

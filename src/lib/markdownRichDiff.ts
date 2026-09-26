@@ -45,12 +45,28 @@ export function markdownSnapshotForHunks(snapshot: MarkdownSnapshot, hunks: Hunk
   return { before, after: afterLines.join('\n') + (endsWithNewline && afterLines.length ? '\n' : '') };
 }
 
-export function renderMarkdownRichDiff(snapshot: MarkdownSnapshot): string {
+export function renderMarkdownRichDiff(snapshot: MarkdownSnapshot, omissionLabel = (count: number) => `Show unchanged sections (${count})`): string {
   const before = blocks(snapshot.before);
   const after = blocks(snapshot.after);
   const parts = diffArrays(before, after);
-  return `<div class="markdown-rich-diff">${parts.map(part => {
-    const kind = part.added ? 'add' : part.removed ? 'delete' : 'context';
-    return part.value.map(source => `<div class="markdown-rich-block ${kind}">${sanitizeMarkdownHtml(markdown.render(source), true)}</div>`).join('');
-  }).join('')}</div>`;
+  const entries = parts.flatMap(part => part.value.map(source => ({ kind: part.added ? 'add' : part.removed ? 'delete' : 'context', source })));
+  const renderBlock = (entry: typeof entries[number]) => {
+    const content = sanitizeMarkdownHtml(markdown.render(entry.source), true);
+    return `<div class="markdown-rich-block ${entry.kind}">${entry.kind === 'delete' ? `<del>${content}</del>` : content}</div>`;
+  };
+  const output: string[] = [];
+  for (let index = 0; index < entries.length;) {
+    if (entries[index]!.kind !== 'context') { output.push(renderBlock(entries[index]!)); index++; continue; }
+    const start = index;
+    while (index < entries.length && entries[index]!.kind === 'context') index++;
+    const end = index;
+    if (end - start <= 2) { output.push(...entries.slice(start, end).map(renderBlock)); continue; }
+    const firstOmitted = start + (start === 0 ? 0 : 1);
+    const lastOmitted = end - (end === entries.length ? 0 : 1);
+    if (start !== 0) output.push(renderBlock(entries[start]!));
+    const omitted = entries.slice(firstOmitted, lastOmitted);
+    if (omitted.length) output.push(`<details class="markdown-rich-omission"><summary>${markdown.utils.escapeHtml(omissionLabel(omitted.length))}</summary>${omitted.map(renderBlock).join('')}</details>`);
+    if (end !== entries.length) output.push(renderBlock(entries[end - 1]!));
+  }
+  return `<div class="markdown-rich-diff">${output.join('')}</div>`;
 }

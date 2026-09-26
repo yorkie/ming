@@ -105,9 +105,24 @@ try {
   } } };
   const topicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: topicRecord, data, settings: defaultGlobalSettings }));
   assert.match(topicHtml, /Update main/);
+  assert.match(topicHtml, /<strong>Update main<\/strong><span class="topic-file-types">.*?TypeScript<\/span>.*?<small>1 change range/);
+  assert.match(topicHtml, /class="topic-file-type" data-type="TypeScript" style="--language-color:#3178c6;">TypeScript<\/span>/);
+  assert.match(topicHtml, /class="topic-detail-languages"><span>Languages<\/span><span class="topic-file-types">/);
+  assert.equal((topicHtml.match(/data-type="TypeScript" style="--language-color:#3178c6;">TypeScript<\/span>/g) ?? []).length, 2);
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  const mixedData: Review = { ...data, files: [
+    { ...data.files[0]!, path: 'src/main.rs' },
+    { ...data.files[0]!, path: 'src/lib.rs' },
+    { ...data.files[0]!, path: 'README.md' },
+  ] };
+  const mixedRecord: ReviewRecord = { ...topicRecord, data: JSON.stringify(mixedData), aiReview: { ...topicRecord.aiReview!, artifact: {
+    ...topicRecord.aiReview!.artifact, topics: [{ ...topicRecord.aiReview!.artifact.topics[0], unitIds: ['f0h0', 'f1h0', 'f2h0'] }],
+  } } };
+  const mixedTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: mixedRecord, data: mixedData, settings: defaultGlobalSettings }));
+  assert.equal((mixedTopicHtml.match(/class="topic-file-type" data-type="Rust" style="--language-color:#dea584;">Rust<\/span>/g) ?? []).length, 2);
+  assert.match(mixedTopicHtml, /class="topic-file-type" data-type="Markdown" style="--language-color:#083fa1;">Markdown<\/span>/);
   const structuredTopicRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, artifact: {
     ...topicRecord.aiReview!.artifact, topics: [{ ...topicRecord.aiReview!.artifact.topics[0], summary: '- Explain the behavior.\n- Cover the test path.' }],
   } } };
@@ -143,7 +158,7 @@ try {
     createdAt: 2, reviewed: {}, artifact: { schemaVersion: 1, snapshotHash: 'markdown', model: 'deepseek-flash',
       topics: [{ id: 'topic-md', title: 'Update first section', summary: 'Update Markdown.', checks: [], unitIds: ['f0h0'] }] },
   } };
-  const markdownSettings = { ...defaultGlobalSettings, richMarkdownByDefault: true };
+  const markdownSettings = defaultGlobalSettings;
   const markdownChangesHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [markdownRecord], record: markdownRecord, data: markdownData, reviewView: 'changes', settings: markdownSettings,
     scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
@@ -152,11 +167,19 @@ try {
   const markdownTopicHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: markdownRecord, data: markdownData, settings: markdownSettings }));
   assert.match(markdownChangesHtml, /View Rich diff/);
   assert.match(markdownTopicHtml, /View Rich diff/);
+  assert.match(markdownChangesHtml, /aria-pressed="true" title="View Rich diff"/);
   assert.match(markdownChangesHtml, /markdown-rich-diff/);
   assert.match(markdownTopicHtml, /markdown-rich-diff/);
   assert.match(markdownChangesHtml, /New second\./);
   assert.doesNotMatch(markdownTopicHtml, /New second\./);
   assert.match(markdownTopicHtml, /New first\./);
+  const markdownWithoutSnapshot: Review = { ...markdownData, files: [{ ...markdownData.files[0]!, markdown: undefined }] };
+  const pendingRichHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [markdownRecord], record: markdownRecord, data: markdownWithoutSnapshot, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(pendingRichHtml, /Preparing Rich diff…/);
   const cssData: Review = { files: [{ path: 'theme.css', status: 'modified', additions: 1, deletions: 1,
     hunks: [{ header: '@@ -1 +1 @@', lines: [
       { kind: 'delete', text: '.title { color: red; }', oldNumber: 1, newNumber: null },
@@ -182,6 +205,7 @@ try {
   assert.match(staleHtml, /topic-stale-action/);
   assert.match(staleHtml, /is-stale/);
   assert.match(staleHtml, /src\/main\.ts/);
+  assert.match(staleHtml, /class="topic-file-type" data-type="TypeScript" style="--language-color:#3178c6;">TypeScript<\/span>/);
   assert.doesNotMatch(staleHtml, /src\/new\.ts/);
   assert.doesNotMatch(staleHtml, /Mark reviewed/);
   const generatingHtml = await renderToString(createSSRApp(TopicReviewView, {

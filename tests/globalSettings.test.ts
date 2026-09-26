@@ -18,6 +18,7 @@ assert.deepEqual(parseGlobalSettings('{"language":"zh-CN","copilotSummaryLanguag
 assert.deepEqual(parseGlobalSettings('{"language":"invalid","copilotSummaryLanguage":"invalid","copilotReviewLanguage":"invalid"}'), defaultGlobalSettings);
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"timer"}').fileChangeDetection, 'timer');
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"invalid"}').fileChangeDetection, 'observer');
+assert.equal(parseGlobalSettings('{"githubPersonalAccessToken":"github-token"}').githubPersonalAccessToken, 'github-token');
 assert.equal(shouldShowDemoProject(defaultGlobalSettings, 0, false), true);
 assert.equal(shouldShowDemoProject({ ...defaultGlobalSettings, showDemoProject: false }, 0, false), false);
 assert.equal(shouldShowDemoProject(defaultGlobalSettings, 1, false), false);
