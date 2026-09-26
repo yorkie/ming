@@ -9,6 +9,7 @@ export type FileTreeNode = {
 
 export function buildFileTree(paths: string[]): FileTreeNode[] {
   const root: FileTreeNode = { name: '', path: '', kind: 'directory', count: 0, children: [] };
+  const childMaps = new WeakMap<FileTreeNode, Map<string, FileTreeNode>>();
   paths.forEach((path, fileIndex) => {
     const segments = path.split('/').filter(Boolean);
     let parent = root;
@@ -16,10 +17,14 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
     for (let index = 0; index < segments.length; index++) {
       const name = segments[index];
       const kind = index === segments.length - 1 ? 'file' : 'directory';
-      let child = parent.children.find(node => node.name === name && node.kind === kind);
+      let siblings = childMaps.get(parent);
+      if (!siblings) { siblings = new Map(); childMaps.set(parent, siblings); }
+      const key = `${kind}:${name}`;
+      let child = siblings.get(key);
       if (!child) {
         child = { name, path: parent.path ? `${parent.path}/${name}` : name, kind, count: 0, children: [], ...(kind === 'file' ? { fileIndex } : {}) };
         parent.children.push(child);
+        siblings.set(key, child);
       }
       child.count++;
       parent = child;

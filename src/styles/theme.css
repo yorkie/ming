@@ -138,6 +138,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .remove, .code-line.delete { color: #cf222e; }
 .review-content-layout { gap: 18px; padding-top: 16px; }
 .review-files .file + .file { margin-top: 16px; }
+.review-load-more { height: 1px; }
 .file[data-file-section] { scroll-margin-top: calc(var(--topbar-height) + 70px); }
 .file { border-color: #d8dee4; border-radius: 6px; overflow: hidden; }
 .file.selected { outline: 2px solid #0969da; outline-offset: 2px; }
@@ -376,6 +377,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .ai-review-progress progress { display: block; width: min(320px, 100%); height: 5px; margin-top: 10px; accent-color: #0969da; }
 .icon-spin::before { animation: icon-spin 1s linear infinite; }
 @keyframes icon-spin { to { transform: rotate(360deg); } }
+.scan-button-turn::before { animation: scan-button-turn .65s ease-out both; }
+@keyframes scan-button-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .scan-button-turn::before { animation: none; }
+}
 
 .commit-panel { border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; background: #fff; }
 .review-commit-list { margin-top: 18px; }

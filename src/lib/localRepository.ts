@@ -1,18 +1,66 @@
 import git from 'isomorphic-git';
 import { Buffer } from 'buffer';
 import { createTwoFilesPatch } from 'diff';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { sha1 } from '@noble/hashes/legacy.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { PackedGitObjects } from './packedGitObjects';
 
 // isomorphic-git expects Node-style buffers and a small fs.promises interface.
 Object.assign(globalThis, { Buffer });
 
 type FsError = Error & { code: string };
+type RepositoryIoStats = {
+  handleCalls: number; handleMs: number;
+  getFileCalls: number; getFileMs: number;
+  directoryCalls: number; directoryMs: number;
+  readCalls: number; readMs: number; readBytes: number;
+  packReadCalls: number; packReadMs: number; packReadBytes: number;
+  packRangeReads: number; packRangeBytes: number; packIndexBytes: number; packObjects: number; packDeltas: number;
+};
 function fsError(code: string, path: string): FsError {
   return Object.assign(new Error(`${code}: ${path}`), { code });
 }
 
 class BrowserRepositoryFs {
   private cache = new Map<string, FileSystemHandle>();
-  constructor(private root: FileSystemDirectoryHandle, private onDirectory?: (path: string) => void) { this.cache.set('/', root); }
+  private fileSnapshots = new Map<string, File>();
+  private packNames?: string[];
+  private packedObjects?: PackedGitObjects;
+  private ignoreFiles = new Map<string, Buffer | null>();
+  private io: RepositoryIoStats = { handleCalls: 0, handleMs: 0, getFileCalls: 0, getFileMs: 0,
+    directoryCalls: 0, directoryMs: 0, readCalls: 0, readMs: 0, readBytes: 0,
+    packReadCalls: 0, packReadMs: 0, packReadBytes: 0,
+    packRangeReads: 0, packRangeBytes: 0, packIndexBytes: 0, packObjects: 0, packDeltas: 0 };
+  constructor(private root: FileSystemDirectoryHandle, private onDirectory?: (path: string) => void, private skipGitAtRoot = false, packRanges = false) {
+    this.cache.set('/', root);
+    if (packRanges) this.packedObjects = new PackedGitObjects(root);
+  }
+
+  private async getFile(handle: FileSystemFileHandle): Promise<File> {
+    const started = performance.now();
+    try { return await handle.getFile(); }
+    finally { this.io.getFileCalls++; this.io.getFileMs += performance.now() - started; }
+  }
+
+  stats(): RepositoryIoStats { return { ...this.io,
+    packRangeReads: this.packedObjects?.rangeReads ?? 0,
+    packRangeBytes: this.packedObjects?.rangeBytes ?? 0,
+    packIndexBytes: this.packedObjects?.indexBytes ?? 0,
+    packObjects: this.packedObjects?.objects ?? 0,
+    packDeltas: this.packedObjects?.deltas ?? 0 };
+  }
+
+  async packedBlob(oid: string): Promise<Uint8Array | null> {
+    const object = await this.packedObjects?.object(oid);
+    return object?.type === 'blob' ? object.content : null;
+  }
+
+  async file(path: string): Promise<File> {
+    const handle = await this.handle(path);
+    if (handle.kind !== 'file') throw fsError('EISDIR', path);
+    return this.getFile(handle as FileSystemFileHandle);
+  }
 
   private async handle(path: string): Promise<FileSystemHandle> {
     const parts = path.split('/').filter(part => part && part !== '.');
@@ -25,11 +73,14 @@ class BrowserRepositoryFs {
       prefix += `/${part}`;
       let next = this.cache.get(prefix);
       if (!next) {
-        try { next = await directory.getFileHandle(part); }
-        catch {
-          try { next = await directory.getDirectoryHandle(part); }
-          catch { throw fsError('ENOENT', path); }
-        }
+        const started = performance.now();
+        try {
+          try { next = await directory.getFileHandle(part); }
+          catch {
+            try { next = await directory.getDirectoryHandle(part); }
+            catch { throw fsError('ENOENT', path); }
+          }
+        } finally { this.io.handleCalls++; this.io.handleMs += performance.now() - started; }
         this.cache.set(prefix, next);
       }
       current = next!;
@@ -39,18 +90,59 @@ class BrowserRepositoryFs {
 
   promises = {
     readFile: async (path: string, options?: string | { encoding?: string }): Promise<Buffer | string> => {
-      const handle = await this.handle(path);
-      if (handle.kind !== 'file') throw fsError('EISDIR', path);
-      const bytes = Buffer.from(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer());
       const encoding = typeof options === 'string' ? options : options?.encoding;
+      const ignoreConfig = this.skipGitAtRoot && (path.endsWith('/.gitignore') || path === '/.git/info/exclude');
+      let bytes = ignoreConfig ? this.ignoreFiles.get(path) : undefined;
+      if (bytes === null) throw fsError('ENOENT', path);
+      if (!bytes) {
+        // An OID has the same bytes whether stored loose or packed. Resolve
+        // indexed objects before probing a usually absent loose-object path.
+        const oid = /^\/\.git\/objects\/([0-9a-f]{2})\/([0-9a-f]{38})$/.exec(path);
+        if (oid && this.packedObjects) {
+          const packed = await this.packedObjects.looseObject(oid[1] + oid[2]);
+          if (packed) {
+            bytes = Buffer.from(packed);
+            return encoding ? bytes.toString(encoding as 'utf8') : bytes;
+          }
+        }
+        try {
+          const snapshot = this.fileSnapshots.get(path);
+          if (snapshot) this.fileSnapshots.delete(path);
+          const file = snapshot ?? await this.file(path);
+          const started = performance.now();
+          bytes = Buffer.from(await file.arrayBuffer());
+          const elapsed = performance.now() - started;
+          this.io.readCalls++; this.io.readMs += elapsed; this.io.readBytes += bytes.length;
+          if (path.startsWith('/.git/objects/pack/') && path.endsWith('.pack')) {
+            this.io.packReadCalls++; this.io.packReadMs += elapsed; this.io.packReadBytes += bytes.length;
+          }
+          if (ignoreConfig) this.ignoreFiles.set(path, bytes);
+        } catch (error) {
+          if (ignoreConfig && (error as FsError).code === 'ENOENT') this.ignoreFiles.set(path, null);
+          throw error;
+        }
+      }
       return encoding ? bytes.toString(encoding as 'utf8') : bytes;
     },
     readdir: async (path: string): Promise<string[]> => {
+      // isomorphic-git lists this directory before every packed-object lookup.
+      // Its contents are stable for the lifetime of one read-only scan.
+      if (path === '/.git/objects/pack' && this.packNames) return this.packNames;
       const handle = await this.handle(path);
       if (handle.kind !== 'directory') throw fsError('ENOTDIR', path);
       if (path !== '/.git' && !path.startsWith('/.git/')) this.onDirectory?.(path === '/' ? '.' : path.replace(/^\//, ''));
       const names: string[] = [];
-      for await (const child of (handle as FileSystemDirectoryHandle).values()) names.push(child.name);
+      const started = performance.now();
+      try {
+        for await (const child of (handle as FileSystemDirectoryHandle).values()) {
+          if (this.skipGitAtRoot && path === '/' && child.name === '.git') continue;
+          // values() already supplied the handle. Reuse it when Git later stats
+          // or reads this entry instead of resolving every path through the API.
+          this.cache.set(`${path === '/' ? '' : path}/${child.name}`, child);
+          names.push(child.name);
+        }
+      } finally { this.io.directoryCalls++; this.io.directoryMs += performance.now() - started; }
+      if (path === '/.git/objects/pack') this.packNames = names;
       return names;
     },
     stat: async (path: string) => this.stat(path),
@@ -66,7 +158,8 @@ class BrowserRepositoryFs {
 
   private async stat(path: string) {
     const handle = await this.handle(path);
-    const file = handle.kind === 'file' ? await (handle as FileSystemFileHandle).getFile() : null;
+    const file = handle.kind === 'file' ? await this.getFile(handle as FileSystemFileHandle) : null;
+    if (file && path !== '/.git' && !path.startsWith('/.git/')) this.fileSnapshots.set(path, file);
     const mtimeMs = file?.lastModified ?? 0;
     return {
       type: handle.kind,
@@ -84,6 +177,13 @@ class BrowserRepositoryFs {
       isDirectory: () => handle.kind === 'directory',
       isSymbolicLink: () => false,
     };
+  }
+
+  clearFileSnapshots() { this.fileSnapshots.clear(); }
+  takeFileSnapshot(path: string): File | undefined {
+    const file = this.fileSnapshots.get(path);
+    this.fileSnapshots.delete(path);
+    return file;
   }
 }
 
@@ -135,6 +235,12 @@ export async function resolveComparisonRef(root: FileSystemDirectoryHandle, conf
     if (await git.resolveRef({ fs: gitFs, dir: '/', ref: `refs/remotes/${candidate}` }).catch(() => null)) return candidate;
   }
   throw new Error(`No local remote-tracking ref for ${branch}. Fetch its remote branch, or choose a comparison ref in project settings.`);
+}
+
+export async function resolveComparisonOid(root: FileSystemDirectoryHandle, ref: string): Promise<string | null> {
+  const fs = new BrowserRepositoryFs(root);
+  const gitFs = fs as unknown as Parameters<typeof git.resolveRef>[0]['fs'];
+  return git.resolveRef({ fs: gitFs, dir: '/', ref }).catch(() => null);
 }
 
 export type CommitSummary = {
@@ -239,7 +345,126 @@ export async function readMarkdownSnapshot(root: FileSystemDirectoryHandle, ref:
   return { snapshot, patch: header + createTwoFilesPatch(`a/${path}`, `b/${path}`, snapshot.before, snapshot.after, '', '', { context: 3 }) };
 }
 
-export async function readLocalRepository(root: FileSystemDirectoryHandle, ref = 'HEAD', onProgress?: (message: string) => void, onMarkdown?: (path: string, snapshot: MarkdownSnapshot) => void): Promise<string> {
+export type ScanOptions = {
+  filepaths?: string[];
+  packRanges?: boolean;
+  // Allows the read-only benchmark to compare walker scheduling policies.
+  walkConcurrency?: number;
+  onPatch?: (patch: string) => void;
+  collectPatch?: boolean;
+  onTiming?: (timing: { statusMs: number; diffMs: number; checked: number; changed: number; io: RepositoryIoStats }) => void;
+};
+
+async function fileDigest(file: File): Promise<string> {
+  const hash = sha256.create();
+  const reader = file.stream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+    }
+  } finally { reader.releaseLock(); }
+  return bytesToHex(hash.digest());
+}
+
+async function largeFileDigests(file: File): Promise<{ oid: string; fingerprint: string }> {
+  const oidHash = sha1.create();
+  const fingerprintHash = sha256.create();
+  oidHash.update(new TextEncoder().encode(`blob ${file.size}\0`));
+  const reader = file.stream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      oidHash.update(value);
+      fingerprintHash.update(value);
+    }
+  } finally { reader.releaseLock(); }
+  return { oid: bytesToHex(oidHash.digest()), fingerprint: bytesToHex(fingerprintHash.digest()) };
+}
+
+type ChangedEntry = { path: string; oldOid: string | null; workdir: boolean; stage: boolean; fingerprint?: string; content?: Uint8Array };
+
+async function changedEntries(fs: BrowserRepositoryFs, ref: string, cache: object, options: ScanOptions): Promise<{ entries: ChangedEntry[]; checked: number }> {
+  const gitFs = fs as unknown as Parameters<typeof git.walk>[0]['fs'];
+  const headerEncoder = new TextEncoder();
+  const autocrlf = await git.getConfig({ fs: gitFs, dir: '/', path: 'core.autocrlf' });
+  // This limit applies to every nested directory. Large values multiply into
+  // thousands of pending walks on deep repositories and delay the whole scan.
+  const walkConcurrency = options.walkConcurrency !== undefined && Number.isFinite(options.walkConcurrency)
+    ? Math.max(1, Math.floor(options.walkConcurrency)) : 2;
+  let activeReads = 0;
+  const waiting: Array<{ weight: number; resolve: () => void }> = [];
+  const withReadSlot = async <T>(weight: number, read: () => Promise<T>): Promise<T> => {
+    if (activeReads + weight > 16 || waiting.length) await new Promise<void>(resolve => waiting.push({ weight, resolve }));
+    else activeReads += weight;
+    try { return await read(); }
+    finally {
+      activeReads -= weight;
+      while (waiting.length && activeReads + waiting[0].weight <= 16) {
+        const next = waiting.shift()!;
+        activeReads += next.weight;
+        next.resolve();
+      }
+    }
+  };
+  let checked = 0;
+  const relevant = (path: string) => !options.filepaths?.length || path === '.' || options.filepaths.some(base =>
+    path === base || path.startsWith(`${base}/`) || base.startsWith(`${path}/`));
+  const entries = await git.walk({ fs: gitFs, dir: '/', cache, trees: [git.TREE({ ref }), git.WORKDIR({ refresh: false }), git.STAGE()],
+    iterate: async (walk, children) => {
+      const paths = [...children];
+      const results: unknown[] = new Array(paths.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(walkConcurrency, paths.length) }, async () => {
+        while (next < paths.length) {
+          const index = next++;
+          results[index] = await walk(paths[index]);
+        }
+      }));
+      return results;
+    },
+    map: async (path, [head, workdir, stage]) => {
+      if (path === '.git' || path.startsWith('.git/') || !relevant(path)) return null;
+      const [headType, workdirType, stageType] = await Promise.all([head?.type(), workdir?.type(), stage?.type()]);
+      if (!head && !stage && workdir && await git.isIgnored({ fs: gitFs, dir: '/', filepath: workdirType === 'tree' ? `${path}/` : path })) return null;
+      if (headType === 'commit' || stageType === 'commit') return null;
+      if (![headType, workdirType, stageType].includes('blob')) return;
+      if (workdirType === 'special') return;
+      checked++;
+      const headOid = headType === 'blob' ? await head!.oid() : null;
+      if (!headOid && workdirType !== 'blob') return;
+      let fingerprint: string | undefined;
+      let changedContent: Uint8Array | undefined;
+      if (headOid && workdirType === 'blob') {
+        const workdirStat = await workdir!.stat();
+        const workdirOid = await withReadSlot((workdirStat?.size ?? 0) > 2_000_000 ? 16 : 1, async () => {
+          if ((workdirStat?.size ?? 0) > 2_000_000 && autocrlf !== 'true') {
+            const file = fs.takeFileSnapshot(`/${path}`) ?? await fs.file(`/${path}`);
+            const digests = await largeFileDigests(file);
+            fingerprint = digests.fingerprint;
+            return digests.oid;
+          }
+          const content = await workdir!.content();
+          if (!content) return null;
+          if (autocrlf !== 'true') changedContent = content;
+          const header = headerEncoder.encode(`blob ${content.length}\0`);
+          const object = new Uint8Array(header.length + content.length);
+          object.set(header);
+          object.set(content, header.length);
+          return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-1', object)));
+        });
+        if (workdirOid === headOid) return;
+      }
+      return { path, oldOid: headOid, workdir: workdirType === 'blob', stage: stageType === 'blob', fingerprint,
+        content: changedContent } satisfies ChangedEntry;
+    } });
+  return { entries: entries as ChangedEntry[], checked };
+}
+
+export async function readLocalRepository(root: FileSystemDirectoryHandle, ref = 'HEAD', onProgress?: (message: string) => void, onMarkdown?: (path: string, snapshot: MarkdownSnapshot) => void, options: ScanOptions = {}): Promise<string> {
+  const started = performance.now();
   await validateGitRepository(root);
 
   let scannedDirectories = 0;
@@ -252,38 +477,40 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
       onProgress?.(`Scanning directory: ${path === '.' ? root.name : path} (${scannedDirectories} checked)…`);
       lastProgress = now;
     }
-  });
+  }, true, options.packRanges ?? true);
   const dir = '/';
   // BrowserRepositoryFs implements the read-only fs.promises methods isomorphic-git uses.
-  const gitFs = fs as unknown as Parameters<typeof git.statusMatrix>[0]['fs'];
+  const gitFs = fs as unknown as Parameters<typeof git.readBlob>[0]['fs'];
+  const gitCache = {};
   const headOid = await git.resolveRef({ fs: gitFs, dir, ref }).catch(() => null);
   if (ref !== 'HEAD' && !headOid) throw new Error(`Comparison ref not found: ${ref}`);
-  // isomorphic-git otherwise rewrites .git/index to refresh stat data.
-  const matrix = await git.statusMatrix({ fs: gitFs, dir, ref, refresh: false, ignored: false });
-  // The index also contains files added since the comparison ref. Count those
-  // with the Git tree, while leaving ordinary untracked files out of its cap.
-  // statusMatrix excludes ignored untracked files when ignored is false.
-  const changed = matrix.filter(([, head, workdir]) => head !== workdir);
-  const trackedCount = changed.filter(([, head, , stage]) => head !== 0 || stage !== 0).length;
+  const { entries: changed, checked } = await changedEntries(fs, ref, gitCache, options);
+  fs.clearFileSnapshots();
+  const statusReady = performance.now();
+  const trackedCount = changed.filter(({ oldOid, stage }) => oldOid || stage).length;
   onProgress?.(`Found ${trackedCount} Git tree changes and ${changed.length - trackedCount} untracked files. Generating diffs…`);
-  if (trackedCount > 500) throw new Error(`This repository has ${trackedCount} changed Git tree files. A scan can handle up to 500 Git tree files; untracked files do not count toward this limit.`);
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const patches: string[] = [];
 
-  for (const [index, [path, head, workdir]] of changed.entries()) {
-    onProgress?.(`Generating diff ${index + 1} of ${changed.length}: ${path}`);
+  for (const [index, { path, oldOid, workdir, fingerprint, content }] of changed.entries()) {
+    if (index === 0 || index === changed.length - 1 || Date.now() - lastProgress >= 100) {
+      onProgress?.(`Generating diff ${index + 1} of ${changed.length}: ${path}`);
+      lastProgress = Date.now();
+    }
     if (path.startsWith('.git/')) continue;
     let oldBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
     let newBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
-    if (head && headOid) {
-      const result = await git.readBlob({ fs: gitFs, dir, oid: headOid, filepath: path });
-      oldBytes = result.blob;
+    const workFile = workdir && !content ? await fs.file(`/${path}`) : null;
+    const largeWorkFile = !!workFile && workFile.size > 2_000_000;
+    if (oldOid && !largeWorkFile) {
+      oldBytes = await fs.packedBlob(oldOid)
+        ?? (await git.readBlob({ fs: gitFs, dir, oid: oldOid, cache: gitCache })).blob;
     }
-    if (workdir) {
-      const result = await fs.promises.readFile(`/${path}`);
-      newBytes = new Uint8Array(result as Buffer);
+    if (content) newBytes = content;
+    else if (workdir && !largeWorkFile) {
+      newBytes = new Uint8Array(await workFile!.arrayBuffer());
     }
-    let binary = oldBytes.length > 2_000_000 || newBytes.length > 2_000_000 || oldBytes.includes(0) || newBytes.includes(0);
+    let binary = largeWorkFile || oldBytes.length > 2_000_000 || newBytes.length > 2_000_000 || oldBytes.includes(0) || newBytes.includes(0);
     let oldText = '';
     let newText = '';
     if (!binary) {
@@ -293,14 +520,19 @@ export async function readLocalRepository(root: FileSystemDirectoryHandle, ref =
     if (!binary && /\.md$/i.test(path) && oldText.length + newText.length <= 1_000_000) {
       onMarkdown?.(path, { before: oldText, after: newText });
     }
-    const header = `diff --git a/${path} b/${path}\n${!head ? 'new file mode 100644\n' : ''}${!workdir ? 'deleted file mode 100644\n' : ''}`;
+    const header = `diff --git a/${path} b/${path}\n${!oldOid ? 'new file mode 100644\n' : ''}${!workdir ? 'deleted file mode 100644\n' : ''}`;
     if (binary) {
-      const fingerprint = async (bytes: Uint8Array<ArrayBufferLike>) =>
-        Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))).map(byte => byte.toString(16).padStart(2, '0')).join('');
-      patches.push(`${header}Ming-Binary-Fingerprint: ${await fingerprint(oldBytes)}:${await fingerprint(newBytes)}\nBinary files a/${path} and b/${path} differ\n`);
+      const oldId = oldOid ?? '';
+      const newId = fingerprint ?? (largeWorkFile ? await fileDigest(workFile!) : bytesToHex(sha256(newBytes)));
+      const patch = `${header}Ming-Binary-Fingerprint: git:${oldId}:sha256:${newId}\nBinary files a/${path} and b/${path} differ\n`;
+      if (options.collectPatch !== false) patches.push(patch);
+      options.onPatch?.(patch);
     } else {
-      patches.push(header + createTwoFilesPatch(`a/${path}`, `b/${path}`, oldText, newText, '', '', { context: 3 }));
+      const patch = header + createTwoFilesPatch(`a/${path}`, `b/${path}`, oldText, newText, '', '', { context: 3 });
+      if (options.collectPatch !== false) patches.push(patch);
+      options.onPatch?.(patch);
     }
   }
+  options.onTiming?.({ statusMs: statusReady - started, diffMs: performance.now() - statusReady, checked, changed: changed.length, io: fs.stats() });
   return patches.join('');
 }

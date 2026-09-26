@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { inspectRepository, readCommitHistory, readEntryCommits, readLocalRepository, readMarkdownSnapshot, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
+import { inspectRepository, readCommitHistory, readEntryCommits, readLocalRepository, readMarkdownSnapshot, resolveComparisonOid, resolveComparisonRef, validateGitRepository } from '../src/lib/localRepository';
 
 function directory(path: string): FileSystemDirectoryHandle {
   return {
@@ -19,6 +19,7 @@ function directory(path: string): FileSystemDirectoryHandle {
       return directory(next);
     },
     async *values() {
+      if (path.endsWith('/.git')) gitDirectoryListings++;
       for (const name of await readdir(path)) {
         const next = join(path, name);
         yield (await stat(next)).isDirectory() ? directory(next) : file(next);
@@ -30,12 +31,40 @@ function file(path: string): FileSystemFileHandle {
   return {
     kind: 'file', name: basename(path),
     async getFile() {
-      const bytes = await readFile(path);
+      if (path.endsWith('/.git/index')) indexStatReads++;
       const info = await stat(path);
-      return { size: bytes.byteLength, lastModified: info.mtimeMs, arrayBuffer: async () => Uint8Array.from(bytes).buffer };
+      return { size: info.size, lastModified: info.mtimeMs,
+        arrayBuffer: async () => {
+          if (path.endsWith('/large.bin')) largeArrayBufferReads++;
+          if (path.includes('/.git/objects/pack/') && path.endsWith('.pack')) packReads++;
+          return Uint8Array.from(await readFile(path)).buffer;
+        },
+        stream: () => new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const bytes = await readFile(path);
+            for (let offset = 0; offset < bytes.length; offset += 65_536) controller.enqueue(bytes.subarray(offset, offset + 65_536));
+            controller.close();
+          },
+        }),
+        slice: (start = 0, end = info.size) => ({ arrayBuffer: async () => {
+          const handle = await open(path, 'r');
+          try {
+            const bytes = Buffer.allocUnsafe(end - start);
+            const { bytesRead } = await handle.read(bytes, 0, bytes.length, start);
+            if (path.endsWith('.pack')) packSliceReads++;
+            return Uint8Array.from(bytes.subarray(0, bytesRead)).buffer;
+          } finally { await handle.close(); }
+        } }) as Blob,
+      };
     },
   } as FileSystemFileHandle;
 }
+
+let indexStatReads = 0;
+let largeArrayBufferReads = 0;
+let gitDirectoryListings = 0;
+let packReads = 0;
+let packSliceReads = 0;
 
 const root = await mkdtemp(join(tmpdir(), 'ming-repo-'));
 try {
@@ -46,6 +75,7 @@ try {
   await writeFile(join(root, 'tracked.txt'), 'before\n');
   await writeFile(join(root, 'unborn.md'), '# Before first commit\n');
   const initialPatch = await readLocalRepository(directory(root));
+  assert.equal(gitDirectoryListings, 0, 'Content scans should not enumerate the .git directory.');
   assert.match(initialPatch, /\+before/);
   const unbornMarkdown = await readMarkdownSnapshot(directory(root), 'HEAD', 'unborn.md');
   assert.deepEqual(unbornMarkdown.snapshot, { before: '', after: '# Before first commit\n' });
@@ -59,6 +89,7 @@ try {
   assert.ok(info.currentBranch);
   assert.ok(info.branches.includes(info.currentBranch));
   assert.equal(info.headOid, baselineOid);
+  assert.equal(await resolveComparisonOid(directory(root), 'HEAD'), baselineOid);
   assert.equal(info.latestCommit?.oid, baselineOid);
   assert.equal(info.latestCommit?.title, 'baseline');
   await assert.rejects(resolveComparisonRef(directory(root), 'HEAD', info.currentBranch), /No local remote-tracking ref/);
@@ -112,6 +143,7 @@ try {
   run('config', `branch.${branch}.remote`, 'origin');
   run('config', `branch.${branch}.merge`, `refs/heads/${branch}`);
   assert.equal(await resolveComparisonRef(directory(root), 'HEAD', branch), `origin/${branch}`);
+  assert.equal(await resolveComparisonOid(directory(root), `origin/${branch}`), remoteOid);
   const remotePatch = await readLocalRepository(directory(root), await resolveComparisonRef(directory(root), 'HEAD', branch));
   assert.match(remotePatch, /-remote/);
   assert.match(remotePatch, /\+after/);
@@ -135,10 +167,37 @@ try {
   await Promise.all(Array.from({ length: 501 }, (_, index) => writeFile(join(root, 'tracked-many', `${index}.txt`), 'before\n')));
   run('add', 'tracked-many');
   run('commit', '-m', 'many tracked files');
+  run('gc', '--quiet');
   await Promise.all(Array.from({ length: 501 }, (_, index) => writeFile(join(root, 'tracked-many', `${index}.txt`), 'after\n')));
-  await assert.rejects(readLocalRepository(directory(root)), /501 changed Git tree files.*500 Git tree files/);
+  const indexReadsBefore = indexStatReads;
+  const packReadsBefore = packReads;
+  const manyTrackedPatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { packRanges: false });
+  assert.ok(indexStatReads - indexReadsBefore < 20, 'A scan should reuse the Git index stat across files.');
+  assert.ok(packReads - packReadsBefore > 0 && packReads - packReadsBefore <= 2, 'A scan should reuse packed Git objects across changed files.');
+  assert.match(manyTrackedPatch, /diff --git a\/tracked-many\/500\.txt b\/tracked-many\/500\.txt/);
+  const packReadsBeforeRanges = packReads;
+  const rangedTrackedPatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { packRanges: true });
+  assert.equal(rangedTrackedPatch, manyTrackedPatch, 'Ranged packed objects should preserve every patch.');
+  assert.equal(packReads, packReadsBeforeRanges, 'Ranged packed objects should not read whole pack files.');
+  assert.ok(packSliceReads > 0, 'Ranged packed objects should read only the needed pack slices.');
+  const concurrentTrackedPatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { walkConcurrency: 32 });
+  assert.equal(manyTrackedPatch, concurrentTrackedPatch, 'Serial and concurrent walks should produce identical patches.');
+  const onePathPatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { filepaths: ['tracked-many/500.txt'] });
+  assert.match(onePathPatch, /tracked-many\/500\.txt/);
+  assert.doesNotMatch(onePathPatch, /tracked-many\/499\.txt/);
   await writeFile(join(root, 'tracked-many', '500.txt'), 'before\n');
   const cappedPatch = await readLocalRepository(directory(root));
   assert.match(cappedPatch, /diff --git a\/tracked-many\/499\.txt b\/tracked-many\/499\.txt/);
+  const largePath = join(root, 'large.bin');
+  await writeFile(largePath, Buffer.alloc(3_000_000, 42));
+  const largePatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { filepaths: ['large.bin'] });
+  assert.match(largePatch, /Ming-Binary-Fingerprint: git::sha256:[a-f0-9]{64}/);
+  assert.doesNotMatch(largePatch, /@@ /);
+  run('add', 'large.bin');
+  run('commit', '-m', 'add large binary');
+  await writeFile(largePath, Buffer.alloc(3_000_001, 43));
+  const modifiedLargePatch = await readLocalRepository(directory(root), 'HEAD', undefined, undefined, { filepaths: ['large.bin'] });
+  assert.match(modifiedLargePatch, /Ming-Binary-Fingerprint: git:[a-f0-9]{40}:sha256:[a-f0-9]{64}/);
+  assert.equal(largeArrayBufferReads, 0, 'Large files should be hashed from a stream.');
   console.log('Local repository integration test passed');
 } finally { await rm(root, { recursive: true, force: true }); }

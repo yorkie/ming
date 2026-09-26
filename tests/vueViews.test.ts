@@ -11,6 +11,7 @@ try {
   const { setLanguage } = await server.ssrLoadModule('/src/lib/i18n.ts');
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
+  const { default: ReviewTreeNode } = await server.ssrLoadModule('/src/components/ReviewTreeNode.vue');
   const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
   const { default: ProjectSettingsView } = await server.ssrLoadModule('/src/components/ProjectSettingsView.vue');
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
@@ -37,6 +38,31 @@ try {
   assert.match(reviewsHtml, /const/);
   assert.match(reviewsHtml, /Changed files/);
   assert.match(reviewsHtml, /Review pairs/);
+  const scanningReviewsHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [record], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: true, scanProgress: 'Checking local changes', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(scanningReviewsHtml, /src\/main\.ts/, 'A scan should keep the current review visible.');
+  assert.doesNotMatch(scanningReviewsHtml, /Scanning working tree/, 'A fast scan should not flash the progress panel.');
+  const manyFilesData: Review = { files: Array.from({ length: 120 }, (_, index) => ({
+    path: `file-${String(index).padStart(3, '0')}.txt`, status: 'modified', additions: 0, deletions: 0, hunks: [],
+  })), additions: 0, deletions: 0 };
+  const manyFilesHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [record], record, data: manyFilesData, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(manyFilesHtml, /file-000\.txt/);
+  assert.doesNotMatch(manyFilesHtml, /file-119\.txt/);
+  assert.match(manyFilesHtml, /Show more files/);
+  const directoryHtml = await renderToString(createSSRApp(ReviewTreeNode, {
+    node: { name: 'src', path: 'src', kind: 'directory', count: 120, children: [
+      { name: 'a.ts', path: 'src/a.ts', kind: 'file', count: 1, children: [], fileIndex: 0 },
+    ] }, files: manyFilesData.files, depth: 0, collapsed: new Set(), selectedIndex: null, large: true,
+  }));
+  assert.match(directoryHtml, /tree-directory/);
+  assert.match(directoryHtml, /aria-expanded="true"/);
   const titledReviewsHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [{ ...record, title: 'Add task status panel' }], record, data, reviewView: 'changes', settings: defaultGlobalSettings,
     scanBusy: false, scanProgress: '', aiBusy: false, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: false,

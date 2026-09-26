@@ -16,12 +16,12 @@ const entries = computed(() => props.projects.flatMap(project => {
   for (const projectId of reviewTitleStatuses.values()) if (projectId === project.id) statuses.push({ phase: 'titling' });
   return statuses.length ? [{ project, statuses }] : [];
 }));
-const activeCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'scanning' || status.phase === 'titling').length, 0));
+const activeCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'scanning' || status.phase === 'metadata' || status.phase === 'titling').length, 0));
 const errorCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'error').length, 0));
-const icon = (phase: TaskStatus['phase']) => ({ watching: 'bi-eye', polling: 'bi-clock-history', scanning: 'bi-arrow-repeat', titling: 'bi-pencil-square', permission: 'bi-lock', error: 'bi-exclamation-triangle' })[phase];
-const title = (phase: TaskStatus['phase']) => t(({ watching: 'File watcher', polling: 'Timer checks', scanning: 'Scanning changes', titling: 'Generating review title', permission: 'Folder access required', error: 'Background task failed' })[phase]);
+const icon = (phase: TaskStatus['phase']) => ({ watching: 'bi-eye', polling: 'bi-clock-history', metadata: 'bi-git', scanning: 'bi-arrow-repeat', titling: 'bi-pencil-square', permission: 'bi-lock', error: 'bi-exclamation-triangle' })[phase];
+const title = (phase: TaskStatus['phase']) => t(({ watching: 'File watcher', polling: 'Timer checks', metadata: 'Checking Git metadata', scanning: 'Scanning changes', titling: 'Generating review title', permission: 'Folder access required', error: 'Background task failed' })[phase]);
 const mode = (status: TaskStatus) => 'mode' in status ? status.mode : undefined;
-const description = (status: TaskStatus) => status.detail ?? t(({ watching: 'Watching for local changes', polling: 'Timer checks active', scanning: 'Checking local changes', titling: 'Summarizing the latest diff', permission: 'Waiting for folder permission', error: 'Background task failed' })[status.phase]);
+const description = (status: TaskStatus) => status.detail ?? t(({ watching: 'Watching for local changes', polling: 'Timer checks active', metadata: 'Reading branch and comparison refs', scanning: 'Checking local changes', titling: 'Summarizing the latest diff', permission: 'Waiting for folder permission', error: 'Background task failed' })[status.phase]);
 function outside(event: PointerEvent) { if (root.value && event.target instanceof Node && !root.value.contains(event.target)) open.value = false; }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape') open.value = false; }
 onMounted(() => { document.addEventListener('pointerdown', outside); document.addEventListener('keydown', keydown); });
@@ -40,7 +40,7 @@ onUnmounted(() => { document.removeEventListener('pointerdown', outside); docume
       <div v-for="{ project, statuses } in entries" :key="project.id" class="background-task-project">
         <strong class="background-task-project-name" :title="project.name">{{ project.name }}</strong>
         <div v-for="(status, index) in statuses" :key="index" class="background-task-state" :class="`is-${status.phase}`" role="status">
-          <i :class="`bi ${icon(status.phase)} ${status.phase === 'scanning' ? 'icon-spin' : ''}`" aria-hidden="true"></i>
+          <i :class="`bi ${icon(status.phase)} ${status.phase === 'scanning' || status.phase === 'metadata' ? 'icon-spin' : ''}`" aria-hidden="true"></i>
           <div><div class="background-task-state-heading"><strong>{{ title(status.phase) }}</strong><span v-if="mode(status)" class="background-task-mode">{{ mode(status) === 'observer' ? 'Observer' : 'Timer' }}</span></div><p>{{ description(status) }}</p></div>
         </div>
       </div>

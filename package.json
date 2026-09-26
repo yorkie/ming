@@ -8,8 +8,9 @@
     "dev": "vite",
     "build:wasm": "wasm-pack build crates/ming-core --target web --out-dir ../../src/wasm --release",
     "build": "npm run build:wasm && vue-tsc --noEmit && vite build",
+    "bench:scan": "node --import tsx scripts/bench-scan.ts",
     "preview": "vite preview",
-    "check": "cargo test --manifest-path crates/ming-core/Cargo.toml && vue-tsc --noEmit && node --import tsx tests/localRepository.test.ts && node --import tsx tests/projectFiles.test.ts && node --import tsx tests/projectStore.test.ts && node --import tsx tests/reviewTitles.test.ts && node --import tsx tests/globalSettings.test.ts && node --import tsx tests/liveReviews.test.ts && node --import tsx tests/aiProgress.test.ts && node --import tsx tests/reviewTree.test.ts && node --import tsx tests/routes.test.ts && node --import tsx tests/syntaxHighlight.test.ts && node --import tsx tests/markdownRichDiff.test.ts && node --import tsx tests/vueViews.test.ts"
+    "check": "cargo test --manifest-path crates/ming-core/Cargo.toml && vue-tsc --noEmit && node --import tsx tests/localRepository.test.ts && node --import tsx tests/projectFiles.test.ts && node --import tsx tests/projectStore.test.ts && node --import tsx tests/reviewTitles.test.ts && node --import tsx tests/globalSettings.test.ts && node --import tsx tests/liveReviews.test.ts && node --import tsx tests/mergeScannedReview.test.ts && node --import tsx tests/aiProgress.test.ts && node --import tsx tests/reviewTree.test.ts && node --import tsx tests/routes.test.ts && node --import tsx tests/syntaxHighlight.test.ts && node --import tsx tests/markdownRichDiff.test.ts && node --import tsx tests/vueViews.test.ts"
   },
   "devDependencies": {
     "@types/diff": "^7.0.2",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
     "@hanzi.pro/webfonts-lxgw-wenkai": "^0.1.0",
+    "@noble/hashes": "^2.4.0",
     "bootstrap-icons": "^1.13.1",
     "buffer": "^6.0.3",
     "chart.js": "^4.5.1",

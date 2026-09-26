@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { inspectRepository, type CommitHistory, type RepositoryInfo } from '../lib/localRepository';
+import { inspectRepository, resolveComparisonOid, resolveComparisonRef, type CommitHistory, type RepositoryInfo } from '../lib/localRepository';
 import { deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveReviewSnapshot, topicsAreStale, type Project, type ReviewRecord } from '../lib/projectStore';
 import { generateReviewTitleInBackground } from '../lib/reviewTitles';
 import { parseRoute, resolveId, routeUrl, shortId, type Route } from '../lib/routes';
@@ -13,7 +13,7 @@ import type { Review } from '../lib/reviewTypes';
 import type { AiRequestUsage, TopicArtifact } from '../lib/aiReviewTypes';
 import { language, t } from '../lib/i18n';
 import { localizeAiProgress } from '../lib/aiProgress';
-import { pauseLiveReview } from '../lib/liveReviews';
+import { pauseLiveReview, pauseLiveReviewForScan } from '../lib/liveReviews';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
 type ReviewView = 'topics' | 'changes' | 'commits';
@@ -168,7 +168,7 @@ function loadCommits() {
   worker.onerror = event => { if (activeId.value !== selected.id || activeReviewId.value !== selectedRecord.id) return; finish(); commitsError.value = event.message || 'Could not read commit history'; };
   worker.postMessage({ directory: selected.directory, localRef: selectedRecord.headOid || 'HEAD', branch: selectedRecord.branch });
 }
-type WorkerMessage = { type: 'progress'; message: string } | { type: 'done'; data: string | null; snapshotHash?: string; gitInfo: RepositoryInfo; baseRef: string } | { type: 'error'; message: string };
+type WorkerMessage = { type: 'progress'; message: string } | { type: 'done'; data: string | null; snapshotHash?: string; gitInfo: RepositoryInfo; baseRef: string; baseOid: string | null } | { type: 'error'; message: string };
 function scanInWorker(directory: FileSystemDirectoryHandle, baseRef: string): Promise<Extract<WorkerMessage, { type: 'done' }>> {
   const worker = new Worker(new URL('../workers/scanWorker.ts', import.meta.url), { type: 'module' });
   return new Promise((resolve, reject) => {
@@ -182,29 +182,68 @@ function scanInWorker(directory: FileSystemDirectoryHandle, baseRef: string): Pr
       else if (finish()) reject(new Error(response.message));
     };
     worker.onerror = event => { if (finish()) reject(new Error(event.message || 'Scan worker stopped unexpectedly')); };
-    worker.postMessage({ directory, baseRef, uiLanguage: language.value });
+    worker.postMessage({ directory, baseRef, source: 'manual', uiLanguage: language.value });
   });
 }
 async function scanProject() {
   const selected = project.value;
   if (!selected || scanBusy.value || aiBusy.value) return;
-  const resumeLiveReview = await pauseLiveReview(selected.id);
+  const started = performance.now();
+  let workerMs = 0;
+  const controller = new AbortController();
+  let resumeLiveReview = () => {};
+  let acceptLiveResult = (_result: Extract<WorkerMessage, { type: 'done' }>) => {};
+  cancelActiveScan = () => controller.abort();
   cancelCommitLoad?.(); commitsBusy.value = false;
-  scanBusy.value = true; scanProgress.value = t('Preparing scan…'); message.value = ''; messageError.value = false;
+  scanBusy.value = true; scanProgress.value = t('Waiting for background scan…'); message.value = ''; messageError.value = false;
   try {
+    const prepared = await pauseLiveReviewForScan(selected.id, controller.signal);
+    resumeLiveReview = prepared.resume;
+    acceptLiveResult = prepared.acceptResult;
+    if (prepared.cached) {
+      const currentInfo = await inspectRepository(selected.directory);
+      const currentRef = await resolveComparisonRef(selected.directory, selected.settings.baseRef, currentInfo.currentBranch);
+      const currentOid = await resolveComparisonOid(selected.directory, currentRef);
+      const savedReviews = await listReviews(selected.id);
+      const saved = savedReviews.find(item => item.branch === prepared.cached!.gitInfo.currentBranch && item.baseRef === prepared.cached!.baseRef);
+      if (!controller.signal.aborted && prepared.isCurrent() && currentInfo.currentBranch === prepared.cached.gitInfo.currentBranch &&
+        currentInfo.headOid === prepared.cached.gitInfo.headOid && currentRef === prepared.cached.baseRef && currentOid === prepared.cached.baseOid &&
+        !!saved === prepared.cached.hadData &&
+        (!saved || saved.snapshotHash === prepared.cached.snapshotHash && saved.headOid === prepared.cached.gitInfo.headOid)) {
+        gitInfo.value = currentInfo;
+        if (!saved) {
+          await clearComparedReview(selected.id, prepared.cached.gitInfo.currentBranch, prepared.cached.baseRef);
+          reviews.value = savedReviews;
+          return note('No changes between the working tree and comparison ref.');
+        }
+        reviews.value = savedReviews;
+        reviewData.value = JSON.parse(saved.data) as Review;
+        activeReviewId.value = saved.id;
+        commitHistory.value = null; commitsError.value = '';
+        navigate({ kind: 'review', projectId: selected.id, reviewId: saved.id, page: settings.defaultReviewTab });
+        return;
+      }
+    }
+    if (controller.signal.aborted) throw new DOMException('Scan canceled', 'AbortError');
+    scanProgress.value = t('Preparing scan…');
+    const workerStarted = performance.now();
     const result = await scanInWorker(selected.directory, selected.settings.baseRef);
+    workerMs = performance.now() - workerStarted;
     gitInfo.value = result.gitInfo;
     if (!result.data) {
       await clearComparedReview(selected.id, result.gitInfo.currentBranch, result.baseRef);
+      acceptLiveResult(result);
       return note('No changes between the working tree and comparison ref.');
     }
     const data = JSON.parse(result.data) as Review;
     if (!data.files.length) {
       await clearComparedReview(selected.id, result.gitInfo.currentBranch, result.baseRef);
+      acceptLiveResult(result);
       return note('No reviewable changes between the working tree and comparison ref.');
     }
     const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(), branch: result.gitInfo.currentBranch, baseRef: result.baseRef, headOid: result.gitInfo.headOid, fileCount: data.files.length, data: result.data, snapshotHash: result.snapshotHash });
     reviews.value = await listReviews(selected.id);
+    acceptLiveResult(result);
     generateReviewTitleInBackground(selected, saved);
     reviewData.value = data;
     activeReviewId.value = saved.id;
@@ -213,7 +252,10 @@ async function scanProject() {
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') note('Scan canceled.');
     else note(`Scan failed: ${error instanceof Error ? error.message : String(error)}`, true);
-  } finally { scanBusy.value = false; resumeLiveReview(); }
+  } finally {
+    console.debug(`[Ming scan UI] ${JSON.stringify({ totalMs: Math.round(performance.now() - started), workerMs: Math.round(workerMs) })}`);
+    scanBusy.value = false; cancelActiveScan = null; resumeLiveReview();
+  }
 }
 async function clearComparedReview(projectId: string, branch: string | null, baseRef: string) {
   const matching = reviews.value.find(item => item.branch === branch && item.baseRef === baseRef);
@@ -335,7 +377,7 @@ async function onLiveReviewsChanged(event: Event) {
   reviews.value = fresh;
   const current = fresh.find(item => item.id === activeReviewId.value);
   reviewData.value = current ? JSON.parse(current.data) as Review : null;
-  if (current && previous?.snapshotHash !== current.snapshotHash) {
+  if (current && (previous?.snapshotHash !== current.snapshotHash || previous?.headOid !== current.headOid)) {
     cancelCommitLoad?.(); commitHistory.value = null; commitsError.value = '';
     if (reviewView.value === 'commits') loadCommits();
   }
