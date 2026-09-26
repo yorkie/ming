@@ -137,6 +137,8 @@ try {
   assert.equal(entryCommits['tracked.txt']?.title, 'local change');
   assert.equal(entryCommits['unborn.md']?.title, 'baseline');
   assert.equal(entryCommits['new.txt'], null);
+  const timedOutEntryCommits = await readEntryCommits(directory(root), '', ['tracked.txt'], localOid, 0);
+  assert.equal(timedOutEntryCommits['tracked.txt'], null, 'A bounded history query should stop without leaving pending entries unresolved.');
   run('checkout', '-b', 'remote-side', baselineOid);
   await writeFile(join(root, 'tracked.txt'), 'remote\n');
   run('add', 'tracked.txt');

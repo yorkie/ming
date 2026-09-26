@@ -21,6 +21,7 @@ const zh: Record<string, string> = {
   'GitHub repository': 'GitHub 仓库', 'Choose a GitHub repository from this project’s remotes.': '从此项目的 Git 远端选择 GitHub 仓库。',
   'No GitHub repository': '不关联 GitHub 仓库',
   'Project navigation': '项目导航', 'Project pages': '项目页面', 'Console sections': '控制台栏目',
+  'Overview': '概览', 'Preferences': '偏好设置', 'Integrations': '集成',
   'Files': '文件', 'Reviews': '评审', 'Branches': '分支', 'Settings': '设置', 'AI usage': 'AI 用量',
   'Appearance': '外观', 'File browsing': '文件浏览', 'Copilot': 'Copilot', 'Workspace': '工作区',
   'Select a project above.': '从上方选一个项目，继续手头的评审。', 'Local projects': '本地项目',

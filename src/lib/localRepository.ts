@@ -263,10 +263,11 @@ export type CommitSummary = {
 };
 
 /** Latest first-parent commit that changed each entry in the current Git tree. */
-export async function readEntryCommits(root: FileSystemDirectoryHandle, path: string, names: string[], headOid: string | null): Promise<Record<string, CommitSummary | null>> {
+export async function readEntryCommits(root: FileSystemDirectoryHandle, path: string, names: string[], headOid: string | null, maxDurationMs = Infinity): Promise<Record<string, CommitSummary | null>> {
   const result: Record<string, CommitSummary | null> = Object.fromEntries(names.map(name => [name, null]));
   if (!headOid || !names.length) return result;
-  const fs = new BrowserRepositoryFs(root);
+  const started = performance.now();
+  const fs = new BrowserRepositoryFs(root, undefined, false, true);
   const gitFs = fs as unknown as Parameters<typeof git.readTree>[0]['fs'];
   const tree = async (oid: string) => {
     try { return new Map((await git.readTree({ fs: gitFs, dir: '/', oid, ...(path ? { filepath: path } : {}) })).tree.map(entry => [entry.path, entry.oid])); }
@@ -277,17 +278,19 @@ export async function readEntryCommits(root: FileSystemDirectoryHandle, path: st
   for (const name of names) if (!headTree.has(name)) pending.delete(name);
   let oid: string | undefined = headOid;
   let depth = 0;
-  while (oid && pending.size && depth++ < 500) {
+  let current = headTree;
+  while (oid && pending.size && depth++ < 500 && performance.now() - started < maxDurationMs) {
     const currentOid: string = oid;
     const { commit } = await git.readCommit({ fs: gitFs, dir: '/', oid: currentOid });
     const parentOid: string | undefined = commit.parent[0];
-    const [current, parent] = await Promise.all([tree(currentOid), parentOid ? tree(parentOid) : Promise.resolve(new Map<string, string>())]);
+    const parent = parentOid ? await tree(parentOid) : new Map<string, string>();
     for (const name of pending) {
       if (current.get(name) !== headTree.get(name)) continue;
       if (current.get(name) === parent.get(name)) continue;
       result[name] = { oid: currentOid, title: commit.message.split('\n')[0], author: commit.author.name, timestamp: commit.author.timestamp };
       pending.delete(name);
     }
+    current = parent;
     oid = parentOid;
   }
   return result;

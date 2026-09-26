@@ -479,6 +479,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .app-body .rail-section { margin: 0; }
 .app-body .rail-heading { padding: 0 10px 12px; }
 .project-nav { display: grid; gap: 4px; }
+.console-nav { gap: 18px; }
+.console-nav-group { display: grid; gap: 4px; }
+.console-nav-group .rail-heading { padding-bottom: 6px; }
 .project-nav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: #59636e; font-size: 14px; text-align: left; }
 .project-nav button:hover { background: #eaeef2; color: #1f2328; }
 .project-nav button.active { background: #ddf4ff; color: #0969da; font-weight: 600; }
@@ -656,6 +659,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .project-file-row:hover { background: #f6f8fa; color: #0969da; }
 .project-file-row > span:nth-child(2), .project-file-row-commit { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-file-row-commit, .project-file-row-time { color: #59636e; font-size: 13px; }
+.project-file-row-commit .icon-spin { display: inline-block; margin-right: 4px; }
 .project-file-row-time { justify-self: end; white-space: nowrap; }
 @media (max-width: 760px) { .project-file-row { grid-template-columns: 20px minmax(0, 1fr) auto; } .project-file-row-commit { display: none; } .project-file-row-time { grid-column: 3; } }
 .project-file-icon { display: grid; place-items: center; width: 20px; height: 20px; color: #59636e; font-size: 16px; }
@@ -731,6 +735,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .rail-global-settings button span { display: none; }
   .app-body .rail-heading { display: none; }
   .project-nav { display: flex; overflow-x: auto; }
+  .console-nav { gap: 4px; }
+  .console-nav-group { display: contents; }
   .project-nav button { width: auto; min-width: max-content; gap: 8px; }
   .app-body .workspace { margin-left: 0; }
   .app-body .review-history { top: calc(var(--topbar-height) + 49px); bottom: auto; left: 0; width: 100%; height: 104px; display: flex; align-items: center; gap: 0; padding: 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid #d8dee4; }

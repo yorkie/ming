@@ -78,13 +78,17 @@ function reviewSummary(projectId: string) {
   const count = language.value === 'zh-CN' ? `${summary.count} 条评审` : `${summary.count} ${summary.count === 1 ? 'review' : 'reviews'}`;
   return `${count} · ${t('Last updated')} ${relativeDate(summary.latestAt)}`;
 }
-const categories: { id: GlobalSettingsSection; label: string; icon: string }[] = [
-  { id: 'usage', label: 'AI usage', icon: 'bar-chart' },
-  { id: 'appearance', label: 'Appearance', icon: 'palette' },
-  { id: 'files', label: 'File browsing', icon: 'folder2-open' },
-  { id: 'reviews', label: 'Reviews', icon: 'file-earmark-diff' },
-  { id: 'copilot', label: 'Copilot', icon: 'robot' },
-  { id: 'github', label: 'GitHub', icon: 'github' },
+const categoryGroups: { label: string; categories: { id: GlobalSettingsSection; label: string; icon: string }[] }[] = [
+  { label: 'Overview', categories: [{ id: 'usage', label: 'AI usage', icon: 'bar-chart' }] },
+  { label: 'Preferences', categories: [
+    { id: 'appearance', label: 'Appearance', icon: 'palette' },
+    { id: 'files', label: 'File browsing', icon: 'folder2-open' },
+    { id: 'reviews', label: 'Reviews', icon: 'file-earmark-diff' },
+  ] },
+  { label: 'Integrations', categories: [
+    { id: 'copilot', label: 'Copilot', icon: 'robot' },
+    { id: 'github', label: 'GitHub', icon: 'github' },
+  ] },
 ];
 function chooseProject(id: string | null) { pickerOpen.value = false; emit('selectProject', id); }
 function pickerKey(event: KeyboardEvent) {
@@ -122,7 +126,7 @@ onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.
     </header>
     <div class="app-body">
       <aside class="rail">
-        <div v-if="mode === 'settings'" class="rail-section"><div class="rail-heading"><span>{{ t('Console sections') }}</span></div><nav class="project-nav" :aria-label="t('Console sections')"><button v-for="category in categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ t(category.label) }}</span></button></nav></div>
+        <div v-if="mode === 'settings'" class="rail-section"><nav class="project-nav console-nav" :aria-label="t('Console sections')"><div v-for="group in categoryGroups" :key="group.label" class="console-nav-group"><div class="rail-heading"><span>{{ t(group.label) }}</span></div><button v-for="category in group.categories" :key="category.id" type="button" :class="{ active: section === category.id }" :aria-current="section === category.id ? 'page' : undefined" @click="emit('selectSection', category.id)"><i :class="`bi bi-${category.icon}`" aria-hidden="true"></i><span class="project-nav-text">{{ t(category.label) }}</span></button></div></nav></div>
         <div v-else-if="activeProject" class="rail-section"><div class="rail-heading"><span>{{ t('Project navigation') }}</span></div><nav class="project-nav" :aria-label="t('Project pages')">
           <button type="button" :class="{ active: page === 'files' }" @click="emit('selectPage', 'files')"><i class="bi bi-folder2" aria-hidden="true"></i><span class="project-nav-text">{{ t('Files') }}</span></button>
           <button type="button" :class="{ active: page === 'reviews' }" @click="emit('selectPage', 'reviews')"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span class="project-nav-text">{{ t('Reviews') }}</span><span class="project-nav-count">{{ reviewCount ?? 0 }}</span></button>
