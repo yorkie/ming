@@ -24,8 +24,11 @@ const path = ref('');
 const message = ref('');
 
 function openProject(id: string | null) { void router.push(id ? routeUrl({ kind: 'project', projectId: id, page: 'files' }) : routeUrl({ kind: 'home' })); }
+function openReview(projectId: string, reviewId: string, tab: 'topics' | 'changes' | 'commits') {
+  void router.push(routeUrl({ kind: 'review', projectId, reviewId, page: tab }));
+}
 async function addProject() {
-  try { const project = await addLocalProject(projects.value); openProject(project.id); }
+  try { const project = await addLocalProject(); openProject(project.id); }
   catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; message.value = error instanceof Error ? error.message : String(error); }
 }
 function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
@@ -38,10 +41,10 @@ onMounted(async () => { try { projects.value = await listProjects(); } catch { /
 </script>
 
 <template>
-  <AppShell :projects="projects" :active-project="demo" hide-project-settings mode="project" :page="page" :review-count="1" :branch-count="2" :review-layout="page === 'reviews'" :hide-line-numbers="!settings.showLineNumbers" :code-font-size="settings.codeFontSize" :code-line-height="settings.codeLineHeight" @home="openProject(null)" @add-project="addProject" @select-project="openProject" @select-page="page = $event as typeof page" @global-settings="router.push(routeUrl({ kind: 'global-settings', section: 'appearance' }))">
+  <AppShell :projects="projects" :active-project="demo" hide-project-settings mode="project" :page="page" :review-count="1" :branch-count="2" :review-layout="page === 'reviews'" :hide-line-numbers="!settings.showLineNumbers" :code-font-size="settings.codeFontSize" :code-line-height="settings.codeLineHeight" @home="openProject(null)" @add-project="addProject" @select-project="openProject" @open-review="openReview" @select-page="page = $event as typeof page" @global-settings="router.push(routeUrl({ kind: 'global-settings', section: 'appearance' }))">
     <DemoIntro v-if="page !== 'reviews'" @add-project="addProject" />
     <FilesView v-if="page === 'files'" :project="demo" :git-info="demoRepository" :path="path" :data="demoFiles[path] ?? null" :busy="false" :error="''" :settings="settings" @navigate="path = $event" @refresh="path = ''" />
-    <ReviewsView v-else-if="page === 'reviews'" demo :project="demo" :reviews="[review]" :record="review" :data="demoReview" :review-view="tab" :settings="settings" :scan-busy="false" :scan-progress="''" :ai-busy="false" :ai-progress="''" :ai-completed="0" :ai-total="0" :ai-configured="false" :commit-history="demoCommits" :commits-busy="false" :commits-error="''" @select-tab="tab = $event" @mark-topic="markTopic"><template #intro><DemoIntro @add-project="addProject" /></template></ReviewsView>
+    <ReviewsView v-else-if="page === 'reviews'" :git-info="demoRepository" demo :project="demo" :reviews="[review]" :record="review" :data="demoReview" :review-view="tab" :settings="settings" :scan-busy="false" :scan-progress="''" :ai-busy="false" :ai-progress="''" :ai-completed="0" :ai-total="0" :ai-configured="false" :commit-history="demoCommits" :commits-busy="false" :commits-error="''" @select-tab="tab = $event" @mark-topic="markTopic"><template #intro><DemoIntro @add-project="addProject" /></template></ReviewsView>
     <BranchesView v-else :git-info="demoRepository" />
     <template #toast><div v-if="message" class="toast error" role="status">{{ message }}<button :aria-label="t('Dismiss message')" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>
   </AppShell>

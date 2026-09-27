@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { listReviews, type Project } from '../lib/projectStore';
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
+import { listReviews, topicsAreStale, type Project, type ReviewRecord } from '../lib/projectStore';
 import type { GlobalSettingsSection } from '../lib/routes';
+import { loadLastOpenedReview, resolveLastOpenedReview, type LastOpenedReview } from '../lib/reviewShortcut';
 import { language, t } from '../lib/i18n';
 import BackgroundTasks from './BackgroundTasks.vue';
 import AiTaskDock from './AiTaskDock.vue';
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   home: [];
   addProject: [];
   selectProject: [id: string | null];
+  openReview: [projectId: string, reviewId: string, tab: LastOpenedReview['tab']];
   selectPage: [page: Page];
   selectSection: [section: GlobalSettingsSection];
   globalSettings: [];
@@ -33,20 +35,20 @@ const pickerOpen = ref(false);
 const logoUrl = `${import.meta.env.BASE_URL}logo-header.png`;
 const picker = ref<HTMLElement | null>(null);
 const options = ref<HTMLButtonElement[]>([]);
-const reviewSummaries = ref<Record<string, { count: number; latestAt: number | null }>>({});
+const reviewsByProject = shallowRef<Record<string, ReviewRecord[]>>({});
+const lastOpened = ref<LastOpenedReview | null>(null);
+const resumeReview = computed(() => resolveLastOpenedReview(lastOpened.value, props.projects, reviewsByProject.value));
 const summariesLoaded = ref(false);
 const now = ref(Date.now());
 let summaryRequest = 0;
 let clock: ReturnType<typeof setInterval> | null = null;
 async function loadReviewSummaries() {
   const request = ++summaryRequest;
-  summariesLoaded.value = false;
   const results = await Promise.allSettled(props.projects.map(async project => {
-    const reviews = await listReviews(project.id);
-    return [project.id, { count: reviews.length, latestAt: reviews[0]?.createdAt ?? null }] as const;
+    return [project.id, await listReviews(project.id)] as const;
   }));
-  if (request !== summaryRequest || !pickerOpen.value) return;
-  reviewSummaries.value = Object.fromEntries(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+  if (request !== summaryRequest) return;
+  reviewsByProject.value = Object.fromEntries(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
   summariesLoaded.value = true;
 }
 watch(pickerOpen, open => {
@@ -54,12 +56,14 @@ watch(pickerOpen, open => {
   clock = null;
   if (open) {
     now.value = Date.now();
-    void loadReviewSummaries();
     clock = setInterval(() => { now.value = Date.now(); }, 60_000);
   }
 });
-watch(() => props.projects, () => { if (pickerOpen.value) void loadReviewSummaries(); });
-function onReviewsChanged() { if (pickerOpen.value) void loadReviewSummaries(); }
+watch(() => props.projects, () => { void loadReviewSummaries(); });
+function onReviewsChanged() { void loadReviewSummaries(); }
+function onLastReviewChanged() { lastOpened.value = loadLastOpenedReview(); }
+function onStorage() { onLastReviewChanged(); void loadReviewSummaries(); }
+function onVisibilityChange() { if (!document.hidden) { onLastReviewChanged(); void loadReviewSummaries(); } }
 function relativeDate(value: number) {
   const seconds = Math.max(0, Math.floor((now.value - value) / 1000));
   if (seconds < 60) return language.value === 'zh-CN' ? '刚刚' : 'just now';
@@ -73,12 +77,14 @@ function relativeDate(value: number) {
   return language.value === 'zh-CN' ? `${years} 年前` : `${years} ${years === 1 ? 'year' : 'years'} ago`;
 }
 function reviewSummary(projectId: string) {
-  const summary = reviewSummaries.value[projectId];
-  if (!summary) return t(summariesLoaded.value ? 'Review info unavailable' : 'Loading reviews…');
-  if (summary.latestAt === null) return t('No reviews yet');
-  const count = language.value === 'zh-CN' ? `${summary.count} 条评审` : `${summary.count} ${summary.count === 1 ? 'review' : 'reviews'}`;
-  return `${count} · ${t('Last updated')} ${relativeDate(summary.latestAt)}`;
+  const reviews = reviewsByProject.value[projectId];
+  if (!reviews) return t(summariesLoaded.value ? 'Review info unavailable' : 'Loading reviews…');
+  if (!reviews.length) return t('No reviews yet');
+  const count = language.value === 'zh-CN' ? `${reviews.length} 条评审` : `${reviews.length} ${reviews.length === 1 ? 'review' : 'reviews'}`;
+  return `${count} · ${t('Last updated')} ${relativeDate(reviews[0].updatedAt ?? reviews[0].createdAt)}`;
 }
+function projectReviews(projectId: string) { return reviewsByProject.value[projectId] ?? []; }
+function reviewLabel(review: ReviewRecord) { return review.title || `${review.branch ?? 'detached'} → ${review.baseRef}`; }
 const categoryGroups: { label: string; categories: { id: GlobalSettingsSection; label: string; icon: string }[] }[] = [
   { label: 'Overview', categories: [{ id: 'usage', label: 'AI usage', icon: 'bar-chart' }] },
   { label: 'Preferences', categories: [
@@ -92,6 +98,9 @@ const categoryGroups: { label: string; categories: { id: GlobalSettingsSection; 
   ] },
 ];
 function chooseProject(id: string | null) { pickerOpen.value = false; emit('selectProject', id); }
+function openReview(projectId: string, reviewId: string, tab: LastOpenedReview['tab'] = 'topics') {
+  pickerOpen.value = false; emit('openReview', projectId, reviewId, tab);
+}
 function pickerKey(event: KeyboardEvent) {
   if (event.key === 'Escape') { pickerOpen.value = false; (event.currentTarget as HTMLElement).querySelector<HTMLButtonElement>('#project-picker-trigger')?.focus(); return; }
   if (event.key === 'Tab') { pickerOpen.value = false; return; }
@@ -103,8 +112,22 @@ function pickerKey(event: KeyboardEvent) {
   options.value[next]?.focus();
 }
 function outside(event: PointerEvent) { if (picker.value && event.target instanceof Node && !picker.value.contains(event.target)) pickerOpen.value = false; }
-onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('ming:reviews-changed', onReviewsChanged); });
-onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.removeEventListener('pointerdown', outside); window.removeEventListener('ming:reviews-changed', onReviewsChanged); });
+onMounted(() => {
+  onLastReviewChanged(); void loadReviewSummaries();
+  document.addEventListener('pointerdown', outside);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('ming:reviews-changed', onReviewsChanged);
+  window.addEventListener('ming:last-review-changed', onLastReviewChanged);
+  window.addEventListener('storage', onStorage);
+});
+onUnmounted(() => {
+  summaryRequest++; if (clock) clearInterval(clock);
+  document.removeEventListener('pointerdown', outside);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('ming:reviews-changed', onReviewsChanged);
+  window.removeEventListener('ming:last-review-changed', onLastReviewChanged);
+  window.removeEventListener('storage', onStorage);
+});
 </script>
 
 <template>
@@ -118,9 +141,13 @@ onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.
           <nav v-show="pickerOpen" id="project-picker-menu" class="project-picker-menu" :aria-label="t('Projects')">
             <button ref="options" type="button" class="project-picker-option" :class="{ selected: !activeProject }" :aria-current="!activeProject" @click="chooseProject(null)"><span class="project-picker-option-name">{{ t('All projects') }}</span><i v-if="!activeProject" class="bi bi-check2" aria-hidden="true"></i></button>
             <div v-if="projects.length" class="project-picker-divider" role="separator"></div>
-            <button v-for="project in projects" :key="project.id" ref="options" type="button" class="project-picker-option project-picker-project" :class="{ selected: activeProject?.id === project.id }" :aria-current="activeProject?.id === project.id" @click="chooseProject(project.id)"><span class="project-picker-option-details"><span class="project-picker-option-name">{{ project.name }}</span><span class="project-picker-option-meta">{{ reviewSummary(project.id) }}</span></span><i v-if="activeProject?.id === project.id" class="bi bi-check2" aria-hidden="true"></i></button>
+            <div v-for="project in projects" :key="project.id" class="project-picker-item">
+              <button ref="options" type="button" class="project-picker-option project-picker-project" :class="{ selected: activeProject?.id === project.id }" :aria-current="activeProject?.id === project.id" @click="chooseProject(project.id)"><span class="project-picker-option-details"><span class="project-picker-option-name">{{ project.name }}</span><span class="project-picker-option-meta">{{ reviewSummary(project.id) }}</span></span><i v-if="activeProject?.id === project.id" class="bi bi-check2" aria-hidden="true"></i></button>
+              <button v-for="review in projectReviews(project.id)" :key="review.id" ref="options" type="button" class="project-picker-review-option" :aria-label="`${t('Open review')} · ${project.name} · ${reviewLabel(review)}`" @click="openReview(project.id, review.id)"><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><span>{{ reviewLabel(review) }}</span><small v-if="topicsAreStale(review)">{{ t('Out of date') }}</small></button>
+            </div>
           </nav>
         </div>
+        <button v-if="resumeReview" type="button" class="button-outline resume-review-button" :aria-label="`${t('Continue review')} · ${resumeReview.project.name} · ${reviewLabel(resumeReview.review)}`" @click="openReview(resumeReview.project.id, resumeReview.review.id, resumeReview.tab)"><i class="bi bi-arrow-return-right" aria-hidden="true"></i><span class="resume-review-label">{{ t('Continue review') }}</span><span class="resume-review-detail">{{ resumeReview.project.name }} · {{ reviewLabel(resumeReview.review) }}</span><small v-if="topicsAreStale(resumeReview.review)">{{ t('Out of date') }}</small></button>
         <button id="add-project-small" class="button-outline" :title="t('Add project')" @click="emit('addProject')"><i class="bi bi-plus" aria-hidden="true"></i> {{ t('Add project') }}</button>
       </div>
       <BackgroundTasks :projects="projects" />

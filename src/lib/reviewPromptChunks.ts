@@ -1,6 +1,11 @@
 const DIFF_MARKER = 'DIFF LINES (fileIndex, hunkIndex, side, lineNumber):';
 const HUNK_HEADER = /^.+ \(fileIndex=\d+, hunkIndex=\d+\) /;
 
+export function addReviewPromptContext(prompt: string, context: string): string {
+  const marker = prompt.indexOf(DIFF_MARKER);
+  return marker < 0 ? `${prompt}\n\n${context}` : `${prompt.slice(0, marker)}${context}\n\n${prompt.slice(marker)}`;
+}
+
 /** Keep the checklist and line anchors in every smaller model request. */
 export function splitReviewPrompt(prompt: string, maxBodyChars = 12_000, force = false): string[] {
   const marker = prompt.indexOf(DIFF_MARKER);

@@ -1,25 +1,52 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { ChartConfiguration } from 'chart.js';
 import UsageChart from './UsageChart.vue';
 import { listAiUsage, type AiUsageRecord, type Project } from '../lib/projectStore';
 import { language, t } from '../lib/i18n';
 import { hourlyUsage } from '../lib/usageTrends';
+import { sortUsageRows, usagePage, usageProjectNames, type UsageSortDirection, type UsageSortKey } from '../lib/usageDetails';
 
 const props = defineProps<{ projects: Project[] }>();
 const records = ref<AiUsageRecord[]>([]);
 const selectedProject = ref('');
+const sortKey = ref<UsageSortKey>('createdAt');
+const sortDirection = ref<UsageSortDirection>('desc');
+const page = ref(1);
+const pageSize = ref(20);
+const detailColumns: { key: UsageSortKey; label: string }[] = [
+  { key: 'createdAt', label: 'Time' }, { key: 'project', label: 'Project' }, { key: 'task', label: 'Task' },
+  { key: 'model', label: 'Model' }, { key: 'status', label: 'Status' }, { key: 'promptTokens', label: 'Input' },
+  { key: 'completionTokens', label: 'Output' }, { key: 'cachedPromptTokens', label: 'Cached input' }, { key: 'totalTokens', label: 'Total' },
+];
 const busy = ref(false);
 const error = ref('');
 const chartNow = ref(Date.now());
 const number = new Intl.NumberFormat('en-US');
-const projectNames = computed(() => {
-  const names = new Map(records.value.map(record => [record.projectId, record.projectName]));
-  for (const project of props.projects) names.set(project.id, project.name);
-  return names;
-});
+const projectNames = computed(() => usageProjectNames(records.value, props.projects));
 const projectOptions = computed(() => [...projectNames.value].sort((a, b) => a[1].localeCompare(b[1])));
 const visible = computed(() => selectedProject.value ? records.value.filter(record => record.projectId === selectedProject.value) : records.value);
+function taskLabel(row: AiUsageRecord) {
+  if (row.task === 'review-title') return t('Review title');
+  if (row.task === 'request-review') return language.value === 'zh-CN' ? `代码评审 · 第 ${row.group} 个主题 · 第 ${row.attempt} 次尝试` : `Code review · topic ${row.group} · attempt ${row.attempt}`;
+  return language.value === 'zh-CN' ? `主题评审 · 第 ${row.group} 组 · 第 ${row.attempt} 次尝试` : `Topic review · group ${row.group} · attempt ${row.attempt}`;
+}
+function statusLabel(row: AiUsageRecord) { return t(row.status === 'success' ? 'Completed' : row.httpStatus ? `HTTP ${row.httpStatus}` : 'Failed'); }
+const sortedDetails = computed(() => sortUsageRows(visible.value, sortKey.value, sortDirection.value, (row, key) => {
+  if (key === 'project') return projectNames.value.get(row.projectId) ?? row.projectName;
+  if (key === 'task') return taskLabel(row);
+  if (key === 'status') return statusLabel(row);
+  return row.model;
+}, language.value));
+const detailsPage = computed(() => usagePage(sortedDetails.value, page.value, pageSize.value));
+watch(selectedProject, () => { page.value = 1; });
+watch(pageSize, () => { page.value = 1; });
+watch(() => detailsPage.value.pageCount, count => { if (page.value > count) page.value = count; });
+function sortBy(key: UsageSortKey) {
+  if (sortKey.value === key) sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
+  else { sortKey.value = key; sortDirection.value = key === 'createdAt' || key.endsWith('Tokens') ? 'desc' : 'asc'; }
+  page.value = 1;
+}
 function sum(rows: AiUsageRecord[], field: 'promptTokens' | 'completionTokens' | 'totalTokens' | 'cachedPromptTokens') {
   return rows.reduce((total, row) => total + (row[field] ?? 0), 0);
 }
@@ -92,7 +119,7 @@ onMounted(() => { void refresh(); });
 
 <template>
   <section class="ai-usage">
-    <div class="ai-usage-heading"><div><h3>{{ t('AI usage') }}</h3><p>{{ t('DeepSeek requests made by this browser for review titles and topics. Token counts come from provider responses.') }}</p></div><div class="ai-usage-controls"><label for="usage-project">{{ t('Project') }}</label><select id="usage-project" v-model="selectedProject"><option value="">{{ t('All projects') }}</option><option v-for="[id, name] in projectOptions" :key="id" :value="id">{{ name }}</option></select><button type="button" class="button-outline" :disabled="busy" @click="refresh">{{ t('Refresh') }}</button></div></div>
+    <div class="ai-usage-heading"><div><h3>{{ t('AI usage') }}</h3><p>{{ t('AI requests made by this browser for review titles, topics, and comments. Token counts come from provider responses.') }}</p></div><div class="ai-usage-controls"><label for="usage-project">{{ t('Project') }}</label><select id="usage-project" v-model="selectedProject"><option value="">{{ t('All projects') }}</option><option v-for="[id, name] in projectOptions" :key="id" :value="id">{{ name }}</option></select><button type="button" class="button-outline" :disabled="busy" @click="refresh">{{ t('Refresh') }}</button></div></div>
     <p v-if="error" class="inline-message error" role="alert">{{ language === 'zh-CN' ? '无法加载 AI 用量：' : 'Could not load AI usage: ' }}{{ error }}</p>
     <div class="ai-usage-metrics"><div><span>{{ t('Total tokens') }}</span><strong>{{ format(totals.total) }}</strong></div><div><span>{{ t('Input tokens') }}</span><strong>{{ format(totals.prompt) }}</strong></div><div><span>{{ t('Output tokens') }}</span><strong>{{ format(totals.completion) }}</strong></div><div><span>{{ t('API requests') }}</span><strong>{{ format(totals.requests) }}</strong><small>{{ format(totals.errors) }} {{ language === 'zh-CN' ? '次失败' : 'failed' }}</small></div></div>
     <p class="ai-usage-note">{{ language === 'zh-CN' ? `缓存输入：${format(totals.cached)} Token。未返回用量的失败请求会计入请求数，其 Token 数量未知。` : `Cached input: ${format(totals.cached)} tokens. Failed requests without provider usage are counted as requests; their token counts remain unknown.` }}</p>
@@ -106,7 +133,12 @@ onMounted(() => { void refresh(); });
       </div>
       <section v-if="!selectedProject" class="ai-usage-panel"><h4>{{ t('By project') }}</h4><div class="ai-usage-table-wrap"><table><thead><tr><th>{{ t('Project') }}</th><th>{{ t('Requests') }}</th><th>{{ t('Input') }}</th><th>{{ t('Output') }}</th><th>{{ t('Total tokens') }}</th></tr></thead><tbody><tr v-for="row in byProject" :key="row.id"><td>{{ row.name }}</td><td>{{ format(row.requests) }}</td><td>{{ format(row.prompt) }}</td><td>{{ format(row.completion) }}</td><td>{{ format(row.total) }}</td></tr></tbody></table></div></section>
       <section class="ai-usage-panel"><h4>{{ t('By day') }}</h4><div class="ai-usage-table-wrap"><table><thead><tr><th>{{ t('Day') }}</th><th>{{ t('Requests') }}</th><th>{{ t('Input') }}</th><th>{{ t('Output') }}</th><th>{{ t('Total tokens') }}</th></tr></thead><tbody><tr v-for="row in byDay" :key="row.day"><td>{{ row.day }}</td><td>{{ format(row.requests) }}</td><td>{{ format(row.prompt) }}</td><td>{{ format(row.completion) }}</td><td>{{ format(row.total) }}</td></tr></tbody></table></div></section>
-      <section class="ai-usage-panel"><h4>{{ t('Request details') }}</h4><div class="ai-usage-table-wrap"><table><thead><tr><th>{{ t('Time') }}</th><th>{{ t('Project') }}</th><th>{{ t('Task') }}</th><th>{{ t('Model') }}</th><th>{{ t('Status') }}</th><th>{{ t('Input') }}</th><th>{{ t('Output') }}</th><th>{{ t('Cached input') }}</th><th>{{ t('Total') }}</th></tr></thead><tbody><tr v-for="row in visible" :key="row.id"><td>{{ date(row.createdAt) }}</td><td>{{ projectNames.get(row.projectId) ?? row.projectName }}</td><td>{{ row.task === 'review-title' ? t('Review title') : row.task === 'request-review' ? language === 'zh-CN' ? `代码评审 · 第 ${row.group} 个主题 · 第 ${row.attempt} 次尝试` : `Code review · topic ${row.group} · attempt ${row.attempt}` : language === 'zh-CN' ? `主题评审 · 第 ${row.group} 组 · 第 ${row.attempt} 次尝试` : `Topic review · group ${row.group} · attempt ${row.attempt}` }}</td><td>{{ row.model }}</td><td>{{ t(row.status === 'success' ? 'Completed' : row.httpStatus ? `HTTP ${row.httpStatus}` : 'Failed') }}</td><td>{{ format(row.promptTokens) }}</td><td>{{ format(row.completionTokens) }}</td><td>{{ format(row.cachedPromptTokens) }}</td><td>{{ format(row.totalTokens) }}</td></tr></tbody></table></div></section>
+      <section class="ai-usage-panel ai-usage-details"><h4>{{ t('Request details') }}</h4>
+        <div class="ai-usage-table-wrap"><table><thead><tr>
+          <th v-for="column in detailColumns" :key="column.key" :aria-sort="sortKey === column.key ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'"><button type="button" class="ai-usage-sort" :class="{ active: sortKey === column.key }" @click="sortBy(column.key)">{{ t(column.label) }}<i :class="sortKey === column.key ? sortDirection === 'asc' ? 'bi bi-arrow-up' : 'bi bi-arrow-down' : 'bi bi-arrow-down-up'" aria-hidden="true"></i></button></th>
+        </tr></thead><tbody><tr v-for="row in detailsPage.rows" :key="row.id"><td>{{ date(row.createdAt) }}</td><td>{{ projectNames.get(row.projectId) ?? row.projectName }}</td><td>{{ taskLabel(row) }}</td><td>{{ row.model }}</td><td>{{ statusLabel(row) }}</td><td>{{ format(row.promptTokens) }}</td><td>{{ format(row.completionTokens) }}</td><td>{{ format(row.cachedPromptTokens) }}</td><td>{{ format(row.totalTokens) }}</td></tr></tbody></table></div>
+        <div class="ai-usage-pagination"><span aria-live="polite">{{ language === 'zh-CN' ? `显示第 ${detailsPage.first}–${detailsPage.last} 条，共 ${detailsPage.total} 条` : `Showing ${detailsPage.first}–${detailsPage.last} of ${detailsPage.total}` }}</span><div class="ai-usage-page-controls"><label for="usage-page-size">{{ t('Rows per page') }}</label><select id="usage-page-size" v-model.number="pageSize"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select><span>{{ language === 'zh-CN' ? `第 ${detailsPage.page} / ${detailsPage.pageCount} 页` : `Page ${detailsPage.page} of ${detailsPage.pageCount}` }}</span><button type="button" class="button-outline" :aria-label="t('Previous page')" :disabled="detailsPage.page === 1" @click="page = detailsPage.page - 1"><i class="bi bi-chevron-left" aria-hidden="true"></i></button><button type="button" class="button-outline" :aria-label="t('Next page')" :disabled="detailsPage.page === detailsPage.pageCount" @click="page = detailsPage.page + 1"><i class="bi bi-chevron-right" aria-hidden="true"></i></button></div></div>
+      </section>
     </template>
   </section>
 </template>

@@ -511,9 +511,14 @@ pub fn start_topic_task(review_json: &str, model: &str) -> Result<String, JsValu
     start_topic_task_with_languages(review_json, model, "en", "en")
 }
 
+fn valid_model_id(model: &str) -> bool {
+    !model.is_empty() && model.len() <= 100 && model.as_bytes()[0].is_ascii_alphanumeric() &&
+        model.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+}
+
 #[wasm_bindgen]
 pub fn start_topic_task_with_languages(review_json: &str, model: &str, summary_language: &str, review_language: &str) -> Result<String, JsValue> {
-    if !matches!(model, "deepseek-flash" | "deepseek-v4-pro") { return Err(error("Unsupported DeepSeek model")); }
+    if !valid_model_id(model) { return Err(error("Invalid model ID")); }
     if !matches!(summary_language, "en" | "zh-CN") || !matches!(review_language, "en" | "zh-CN") { return Err(error("Unsupported review language")); }
     let review: Review = serde_json::from_str(review_json).map_err(error)?;
     let units = units_from_review(&review);
@@ -560,7 +565,7 @@ fn review_comment_transition(state: ReviewCommentState) -> Result<String, JsValu
 }
 
 fn start_review_comment_task(input_json: &str, model: &str, review_language: &str) -> Result<String, JsValue> {
-    if !matches!(model, "deepseek-flash" | "deepseek-v4-pro") { return Err(error("Unsupported DeepSeek model")); }
+    if !valid_model_id(model) { return Err(error("Invalid model ID")); }
     if !matches!(review_language, "en" | "zh-CN") { return Err(error("Unsupported review language")); }
     let request: ReviewRequest = serde_json::from_str(input_json).map_err(error)?;
     let review: Review = serde_json::from_value(request.review.clone()).map_err(error)?;
@@ -624,7 +629,7 @@ pub fn start_task_with_languages(kind: &str, input_json: &str, model: &str, summ
 }
 
 fn start_title_task(review_json: &str, model: &str, language: &str) -> Result<String, JsValue> {
-    if !matches!(model, "deepseek-flash" | "deepseek-v4-pro") { return Err(error("Unsupported DeepSeek model")); }
+    if !valid_model_id(model) { return Err(error("Invalid model ID")); }
     if !matches!(language, "en" | "zh-CN") { return Err(error("Unsupported review language")); }
     let review: Review = serde_json::from_str(review_json).map_err(error)?;
     let state = TitleState { schema_version: 1, task_kind: "review-title".into(), snapshot_hash: hash_review(&review)?, model: model.into() };
@@ -778,6 +783,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn accepts_configured_model_ids() {
+        assert!(valid_model_id("deepseek-flash"));
+        assert!(valid_model_id("gpt-4.1-mini"));
+        assert!(!valid_model_id(""));
+        assert!(!valid_model_id("bad model"));
+        assert!(!valid_model_id(&"a".repeat(101)));
+    }
+
+    #[test]
     fn applies_separate_languages_to_summary_and_review_guidance() {
         let review = r#"{"files":[{"path":"a.rs","status":"modified","hunks":[]}] }"#;
         let transition: serde_json::Value = serde_json::from_str(&start_task_with_languages("topic-review", review, "deepseek-flash", "zh-CN", "en").unwrap()).unwrap();
@@ -790,6 +804,7 @@ mod tests {
     #[test]
     fn creates_and_validates_review_title_task() {
         let review = r#"{"files":[{"path":"src/main.rs","status":"modified","hunks":[{"header":"@@ -1 +1 @@","lines":[{"kind":"add","text":"add a task status panel"}]}]}]}"#;
+        assert!(start_task_with_languages("review-title", review, "gpt-4.1", "en", "en").is_ok());
         let first: serde_json::Value = serde_json::from_str(&start_task_with_languages("review-title", review, "deepseek-flash", "zh-CN", "en").unwrap()).unwrap();
         assert!(first["command"]["prompt"].as_str().unwrap().contains("in Simplified Chinese"));
         assert_eq!(first["command"]["maxOutputTokens"], 160);

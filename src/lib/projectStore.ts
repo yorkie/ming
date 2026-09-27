@@ -11,6 +11,7 @@ export type ReviewRecord = {
   id: string;
   projectId: string;
   createdAt: number;
+  updatedAt?: number;
   branch: string | null;
   baseRef: string;
   headOid?: string | null;
@@ -32,7 +33,7 @@ export type AiUsageRecord = {
   reviewId: string;
   createdAt: number;
   task: 'topic-review' | 'review-title' | 'request-review';
-  provider: 'deepseek';
+  provider: 'deepseek' | 'openai';
   model: string;
   group: number;
   attempt: number;
@@ -95,7 +96,7 @@ export async function listReviews(projectId: string): Promise<ReviewRecord[]> {
     const request = store.index('projectId').getAll(projectId);
     let reviews: ReviewRecord[] = [];
     request.onsuccess = () => {
-      const sorted = request.result.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+      const sorted = request.result.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt) || b.id.localeCompare(a.id));
       const pairs = new Map<string, ReviewRecord>();
       for (const review of sorted) {
         const key = JSON.stringify([review.branch, review.baseRef]);
@@ -166,7 +167,8 @@ export async function saveReviewCommentsIfCurrent(id: string, artifact: ReviewCo
   });
 }
 export async function saveTopicReviewResultIfCurrent(id: string, artifact: ReviewCommentArtifact, topicsCreatedAt: number,
-  topicId: string, recommendations: string[], recommendationSeverities: (ReviewSeverity | null)[] = []): Promise<TopicReview | null> {
+  topicId: string, recommendations: string[], recommendationSeverities: (ReviewSeverity | null)[] = [],
+  assessments: NonNullable<TopicReview['priorAssessments']> = {}): Promise<TopicReview | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('reviews', 'readwrite');
@@ -180,9 +182,11 @@ export async function saveTopicReviewResultIfCurrent(id: string, artifact: Revie
         !current.aiReview.artifact.topics.some(topic => topic.id === topicId) ||
         artifact.comments.some(comment => comment.topicId !== topicId)) return;
       saved = { ...current.aiReview,
-        comments: [...(current.aiReview.comments ?? []).filter(comment => comment.topicId !== topicId), ...artifact.comments],
+        comments: [...(current.aiReview.comments ?? []).filter(comment => comment.topicId !== topicId),
+          ...artifact.comments.map(comment => ({ ...comment, id: `${current.aiReview!.reviewRunId ?? topicsCreatedAt}:${comment.id}` }))],
         recommendations: { ...current.aiReview.recommendations, [topicId]: recommendations },
         recommendationSeverities: { ...current.aiReview.recommendationSeverities, [topicId]: recommendationSeverities },
+        priorAssessments: { ...current.aiReview.priorAssessments, ...assessments },
         commentsCreatedAt: Date.now() };
       store.put({ ...current, aiReview: saved });
     };
@@ -191,7 +195,7 @@ export async function saveTopicReviewResultIfCurrent(id: string, artifact: Revie
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
-export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreatedAt: number): Promise<TopicReview | null> {
+export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreatedAt: number, full = false): Promise<TopicReview | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('reviews', 'readwrite');
@@ -201,7 +205,14 @@ export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreated
     request.onsuccess = () => {
       const current = request.result as ReviewRecord | undefined;
       if (!current?.aiReview || topicsAreStale(current) || current.aiReview.createdAt !== topicsCreatedAt) return;
-      saved = { ...current.aiReview, comments: [], recommendations: {}, recommendationSeverities: {}, commentsCreatedAt: undefined };
+      const prior = current.aiReview;
+      const previousComments = full ? [] : [...new Map([...(prior.previousComments ?? []), ...(prior.comments ?? [])]
+        .filter(comment => prior.commentDecisions?.[comment.id] !== 'resolved').map(comment => [comment.id, comment])).values()];
+      saved = { ...prior, comments: [], reviewRunId: crypto.randomUUID(), previousComments,
+        recommendations: {}, recommendationSeverities: {}, priorAssessments: {}, commentsCreatedAt: undefined,
+        revisions: prior.commentsCreatedAt ? [...(prior.revisions ?? []), { artifact: prior.artifact, sourceData: prior.sourceData,
+          reviewed: prior.reviewed, comments: prior.comments, recommendations: prior.recommendations,
+          commentDecisions: prior.commentDecisions, createdAt: prior.commentsCreatedAt ?? Date.now() }] : prior.revisions };
       store.put({ ...current, aiReview: saved });
     };
     tx.oncomplete = () => { db.close(); resolve(saved); };
@@ -234,13 +245,47 @@ export async function deleteReview(id: string): Promise<void> {
   await requestInStore('reviews', 'readwrite', store => store.delete(id));
 }
 export async function recordAiUsage(record: AiUsageRecord): Promise<void> {
-  await requestInStore('aiUsage', 'readwrite', store => store.put(record));
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['projects', 'aiUsage'], 'readwrite');
+    const request = tx.objectStore('projects').get(record.projectId);
+    request.onsuccess = () => { if (request.result) tx.objectStore('aiUsage').put(record); };
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
 }
 export async function listAiUsage(): Promise<AiUsageRecord[]> {
-  return (await requestInStore<AiUsageRecord[]>('aiUsage', 'readonly', store => store.getAll()))
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['projects', 'aiUsage'], 'readwrite');
+    const projects = tx.objectStore('projects').getAllKeys();
+    let records: AiUsageRecord[] = [];
+    projects.onsuccess = () => {
+      const active = new Set(projects.result);
+      const usage = tx.objectStore('aiUsage');
+      const request = usage.getAll();
+      request.onsuccess = () => {
+        records = request.result.filter(record => {
+          if (active.has(record.projectId)) return true;
+          usage.delete(record.id);
+          return false;
+        }).sort((a, b) => b.createdAt - a.createdAt);
+      };
+    };
+    tx.oncomplete = () => { db.close(); resolve(records); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
 }
 export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRecord> {
+  const existingReviews = await listReviews(review.projectId);
+  const active = existingReviews.find(item => item.branch === review.branch && item.baseRef === review.baseRef);
+  if (!active && existingReviews.length) {
+    const blocking = existingReviews[0];
+    if (blocking.baseRef === review.baseRef) throw new Error(`Review for ${review.baseRef} belongs to ${blocking.branch ?? 'detached HEAD'}. Close it before reviewing another source branch.`);
+    throw new Error(`Close the review for ${blocking.baseRef} before creating another review.`);
+  }
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('reviews', 'readwrite');
@@ -250,11 +295,12 @@ export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRe
     request.onsuccess = () => {
       const matches = request.result
         .filter(item => item.branch === review.branch && item.baseRef === review.baseRef)
-        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+        .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt) || b.id.localeCompare(a.id));
       const matchingTopics = matches.find(item => item.aiReview && sameSnapshot(item, review));
       const matchingTitle = matches.find(item => item.title && sameSnapshot(item, review));
       const previousTopics = matchingTopics ?? matches.find(item => item.aiReview);
-      saved = { ...review, id: matches[0]?.id ?? review.id,
+      saved = { ...review, id: matches[0]?.id ?? review.id, createdAt: matches[0]?.createdAt ?? review.createdAt,
+        updatedAt: review.createdAt,
         title: matchingTitle?.title,
         aiReview: previousTopics?.aiReview && {
           ...previousTopics.aiReview,
@@ -270,12 +316,14 @@ export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRe
 }
 export async function deleteProject(id: string): Promise<void> {
   const db = await openDatabase();
-  const reviewIds = (await listReviews(id)).map(review => review.id);
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['projects', 'reviews'], 'readwrite');
+    const tx = db.transaction(['projects', 'reviews', 'aiUsage'], 'readwrite');
     tx.objectStore('projects').delete(id);
-    const store = tx.objectStore('reviews');
-    for (const reviewId of reviewIds) store.delete(reviewId);
+    for (const name of ['reviews', 'aiUsage'] as const) {
+      const store = tx.objectStore(name);
+      const keys = store.index('projectId').getAllKeys(id);
+      keys.onsuccess = () => { for (const key of keys.result) store.delete(key); };
+    }
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onabort = () => { db.close(); reject(tx.error); };
     tx.onerror = () => { db.close(); reject(tx.error); };

@@ -1,6 +1,6 @@
 import { reactive } from 'vue';
 import { loadGlobalSettings } from './globalSettings';
-import { deleteReview, listProjects, listReviews, rememberReview, saveReviewSnapshot, type Project } from './projectStore';
+import { listProjects, listReviews, rememberReview, saveReviewSnapshot, type Project } from './projectStore';
 import { createRepositoryIgnoreChecker, inspectRepository, resolveComparisonOid, resolveComparisonRef, type RepositoryInfo } from './localRepository';
 import type { Review } from './reviewTypes';
 import { language, t } from './i18n';
@@ -37,6 +37,8 @@ function waitForWorker<T>(worker: Worker, request: unknown, job: Job): Promise<T
 }
 async function reconcile(job: Job) {
   const selected = job.project;
+  const active = (await listReviews(selected.id))[0];
+  if (!active) { job.lastCompleted = undefined; return; }
   const fullScan = job.fullScan || !job.observer || !job.lastBaseRef || !job.dirtyPaths.size;
   const filepaths = fullScan ? undefined : [...job.dirtyPaths];
   job.fullScan = false;
@@ -46,7 +48,7 @@ async function reconcile(job: Job) {
   try {
     const existing = filepaths ? (await listReviews(selected.id)).find(item => item.branch === job.lastBranch && item.baseRef === job.lastBaseRef) : undefined;
     scanned = await waitForWorker<ScanResult>(new Worker(new URL('../workers/scanWorker.ts', import.meta.url), { type: 'module' }),
-      { directory: selected.directory, baseRef: selected.settings.baseRef, source: 'background', uiLanguage: language.value, filepaths,
+      { directory: selected.directory, baseRef: active.baseRef, source: 'background', uiLanguage: language.value, filepaths,
         previousData: filepaths ? existing?.data ?? null : undefined, expectedHeadOid: job.lastHeadOid,
         expectedBaseRef: job.lastBaseRef, expectedBaseOid: job.lastBaseOid,
         expectedBranch: job.lastBranch, expectedDataPresent: job.lastHadReview }, job);
@@ -57,15 +59,22 @@ async function reconcile(job: Job) {
     throw error;
   }
   if (job.stopped) return;
+  if (active.branch !== scanned.gitInfo.currentBranch) return;
   job.lastHeadOid = scanned.gitInfo.headOid;
   job.lastBaseRef = scanned.baseRef;
   job.lastBaseOid = scanned.baseOid;
   job.lastBranch = scanned.gitInfo.currentBranch;
   job.lastHadReview = !!scanned.data;
-  const existing = (await listReviews(selected.id)).find(item => item.branch === scanned.gitInfo.currentBranch && item.baseRef === scanned.baseRef);
+  const existing = (await listReviews(selected.id)).find(item => item.id === active.id);
+  if (!existing) return;
   const data = scanned.data ? JSON.parse(scanned.data) as Review : null;
   if (!data?.files.length) {
-    if (existing) { await deleteReview(existing.id); notify(selected.id); }
+    const emptyData = scanned.data ?? '{"files":[],"additions":0,"deletions":0}';
+    if (existing.data !== emptyData || existing.snapshotHash !== scanned.snapshotHash || existing.headOid !== scanned.gitInfo.headOid) {
+      await saveReviewSnapshot({ ...existing, createdAt: Date.now(), data: emptyData,
+        snapshotHash: scanned.snapshotHash, headOid: scanned.gitInfo.headOid, fileCount: 0 });
+      notify(selected.id);
+    }
     job.lastCompleted = { gitInfo: scanned.gitInfo, baseRef: scanned.baseRef, baseOid: scanned.baseOid, hadData: false };
     return;
   }
@@ -74,8 +83,8 @@ async function reconcile(job: Job) {
     job.lastCompleted = { gitInfo: scanned.gitInfo, baseRef: scanned.baseRef, baseOid: scanned.baseOid, snapshotHash: scanned.snapshotHash, hadData: true };
     return;
   }
-  const saved = await saveReviewSnapshot({ id: crypto.randomUUID(), projectId: selected.id, createdAt: Date.now(),
-    branch: scanned.gitInfo.currentBranch, baseRef: scanned.baseRef, headOid: scanned.gitInfo.headOid,
+  const saved = await saveReviewSnapshot({ id: existing.id, projectId: selected.id, createdAt: Date.now(),
+    branch: existing.branch, baseRef: existing.baseRef, headOid: scanned.gitInfo.headOid,
     fileCount: data.files.length, data: scanned.data!, snapshotHash: scanned.snapshotHash });
   notify(selected.id);
   generateReviewTitleInBackground(selected, saved);
@@ -83,8 +92,11 @@ async function reconcile(job: Job) {
 }
 async function refreshGitMetadata(job: Job) {
   status(job, 'metadata', job.lastGitPath);
+  const active = (await listReviews(job.project.id))[0];
+  if (!active) return;
   const gitInfo = await inspectRepository(job.project.directory);
-  const baseRef = await resolveComparisonRef(job.project.directory, job.project.settings.baseRef, gitInfo.currentBranch);
+  if (active.branch !== gitInfo.currentBranch) return;
+  const baseRef = await resolveComparisonRef(job.project.directory, active.baseRef, gitInfo.currentBranch);
   const baseOid = await resolveComparisonOid(job.project.directory, baseRef);
   if (!job.lastBaseRef) return;
   if (job.lastBranch !== gitInfo.currentBranch || job.lastBaseRef !== baseRef || job.lastBaseOid !== baseOid) {
@@ -96,7 +108,7 @@ async function refreshGitMetadata(job: Job) {
   if (job.lastHeadOid === gitInfo.headOid) return;
   job.lastHeadOid = gitInfo.headOid;
   if (job.lastCompleted) job.lastCompleted = { ...job.lastCompleted, gitInfo };
-  const existing = (await listReviews(job.project.id)).find(item => item.branch === gitInfo.currentBranch && item.baseRef === baseRef);
+  const existing = active;
   if (existing && existing.headOid !== gitInfo.headOid) {
     await rememberReview({ ...existing, headOid: gitInfo.headOid });
     notify(job.project.id);

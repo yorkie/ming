@@ -43,7 +43,7 @@ async function readSse(body: ReadableStream<Uint8Array>, onChunk: (chunk: Stream
     drain();
     if (pending.trim()) event(pending);
   } finally { reader.releaseLock(); }
-  if (!done) throw new Error('DeepSeek stream ended before completion.');
+  if (!done) throw new Error('Chat completion stream ended before completion.');
 }
 
 export async function readDeepSeekStream(body: ReadableStream<Uint8Array>, onContent: (characters: number) => void): Promise<DeepSeekStreamResult> {

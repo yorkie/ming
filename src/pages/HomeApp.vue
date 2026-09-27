@@ -16,10 +16,13 @@ const message = ref('');
 const messageError = ref(false);
 function note(value: string, error = false) { message.value = value; messageError.value = error; }
 function openProject(id: string | null, page: 'files' | 'reviews' = 'files') { if (id) void router.push(routeUrl({ kind: 'project', projectId: id, page })); }
+function openReview(projectId: string, reviewId: string, tab: 'topics' | 'changes' | 'commits') {
+  void router.push(routeUrl({ kind: 'review', projectId, reviewId, page: tab }));
+}
 function openSettings() { void router.push(routeUrl({ kind: 'global-settings' })); }
 function openDemo() { void router.push('/demo/'); }
 async function addProject() {
-  try { const project = await addLocalProject(projects.value); openProject(project.id); }
+  try { const project = await addLocalProject(); openProject(project.id); }
   catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; note(error instanceof Error ? error.message : String(error), true); }
 }
 onMounted(async () => {
@@ -29,7 +32,7 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <AppShell v-if="ready" :projects="projects" mode="home" @home="() => {}" @add-project="addProject" @select-project="openProject" @global-settings="openSettings">
+  <AppShell v-if="ready" :projects="projects" mode="home" @home="() => {}" @add-project="addProject" @select-project="openProject" @open-review="openReview" @global-settings="openSettings">
     <div class="projects-page home-page">
       <section class="home-hero">
         <div class="home-eyebrow">{{ t('WELCOME TO MING') }}</div>
@@ -42,7 +45,7 @@ onMounted(async () => {
         <div class="home-steps">
           <article><span class="home-step-number">01</span><i class="bi bi-folder2-open" aria-hidden="true"></i><h3>{{ t('Choose your repository') }}</h3><p>{{ t('Select a local Git folder and grant read access. No upload or GitHub sign-in is needed.') }}</p></article>
           <article><span class="home-step-number">02</span><i class="bi bi-file-earmark-diff" aria-hidden="true"></i><h3>{{ t('Inspect the changes') }}</h3><p>{{ t('Open Reviews to compare your working tree with a Git ref. Ming keeps the review current while this page is open.') }}</p></article>
-          <article><span class="home-step-number">03</span><i class="bi bi-check2-square" aria-hidden="true"></i><h3>{{ t('Review by topic') }}</h3><p>{{ t('Add a DeepSeek key in MING Console when you want AI topics. Check each topic against its diff and mark your decision.') }}</p></article>
+          <article><span class="home-step-number">03</span><i class="bi bi-check2-square" aria-hidden="true"></i><h3>{{ t('Review by topic') }}</h3><p>{{ t('Configure an AI provider in MING Console to generate topics. Check each topic against its diff and mark your decision.') }}</p></article>
         </div>
       </section>
       <section class="home-projects" :aria-label="t('Local projects')">

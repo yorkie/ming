@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-const props = defineProps<{ modelValue: string; options: { value: string; label: string; icon?: 'github' }[]; label: string }>();
+type Option = { value: string; label: string; icon?: 'github'; group?: string };
+const props = defineProps<{ modelValue: string; options: Option[]; label: string }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const optionButtons = ref<HTMLButtonElement[]>([]);
 const selectedOption = computed(() => props.options.find(option => option.value === props.modelValue) ?? props.options[0]);
+const optionGroups = computed(() => props.options.reduce<{ label?: string; options: Option[] }[]>((groups, option) => {
+  const last = groups[groups.length - 1];
+  if (last && last.label === option.group) last.options.push(option);
+  else groups.push({ label: option.group, options: [option] });
+  return groups;
+}, []));
 function outside(event: PointerEvent) { if (root.value && event.target instanceof Node && !root.value.contains(event.target)) open.value = false; }
 function choose(value: string) { emit('update:modelValue', value); open.value = false; trigger.value?.focus(); }
 function keydown(event: KeyboardEvent) {
@@ -26,7 +33,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside));
   <div ref="root" class="custom-select" @keydown="keydown">
     <button ref="trigger" type="button" class="custom-select-trigger" aria-haspopup="listbox" :aria-label="label" :aria-expanded="open" @click="open = !open"><span class="custom-select-value"><i v-if="selectedOption?.icon === 'github'" class="bi bi-github custom-select-icon" aria-hidden="true"></i><span class="custom-select-text">{{ selectedOption?.label }}</span></span><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
     <div v-show="open" class="custom-select-options" role="listbox" :aria-label="label">
-      <button v-for="option in options" :key="option.value" ref="optionButtons" type="button" class="custom-select-option" role="option" :aria-selected="option.value === modelValue" tabindex="-1" @click="choose(option.value)"><span class="custom-select-option-label"><i v-if="option.icon === 'github'" class="bi bi-github custom-select-icon" aria-hidden="true"></i><span class="custom-select-text">{{ option.label }}</span></span><i class="bi bi-check2" aria-hidden="true"></i></button>
+      <div v-for="(group, index) in optionGroups" :key="`${group.label ?? 'ungrouped'}-${index}`" role="group" :aria-label="group.label || label">
+        <div v-if="group.label" class="custom-select-group-label" aria-hidden="true">{{ group.label }}</div>
+        <button v-for="option in group.options" :key="option.value" ref="optionButtons" type="button" class="custom-select-option" role="option" :aria-selected="option.value === modelValue" tabindex="-1" @click="choose(option.value)"><span class="custom-select-option-label"><i v-if="option.icon === 'github'" class="bi bi-github custom-select-icon" aria-hidden="true"></i><span class="custom-select-text">{{ option.label }}</span></span><i class="bi bi-check2" aria-hidden="true"></i></button>
+      </div>
     </div>
   </div>
 </template>

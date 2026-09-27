@@ -1,4 +1,4 @@
-export async function deepSeekRequestError(response: Response, stage: string): Promise<Error> {
+export async function chatCompletionRequestError(response: Response, stage: string, provider: 'DeepSeek' | 'OpenAI'): Promise<Error> {
   let detail = '';
   try {
     const body = await response.json() as { error?: { message?: unknown; code?: unknown } };
@@ -7,5 +7,5 @@ export async function deepSeekRequestError(response: Response, stage: string): P
     if (typeof message === 'string') detail = message;
     else if (typeof code === 'string') detail = code;
   } catch { /* Keep the HTTP status when the provider did not return JSON. */ }
-  return new Error(`DeepSeek ${stage} request failed (${response.status})${detail ? `: ${detail.slice(0, 600)}` : '.'}`);
+  return new Error(`${provider} ${stage} request failed (${response.status})${detail ? `: ${detail.slice(0, 600)}` : '.'}`);
 }

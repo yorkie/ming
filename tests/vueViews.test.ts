@@ -54,10 +54,17 @@ try {
   assert.doesNotMatch(startingActivityHtml, /aria-valuenow/);
   const noReviewProgressHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [], record: null, data: null, reviewView: 'topics', settings: defaultGlobalSettings,
+    gitInfo: { currentBranch: 'feature', branches: ['main', 'feature', 'release/1'], remoteBranches: ['upstream/main', 'origin/release/1', 'origin/main'], headOid: null, latestCommit: null },
     scanBusy: false, scanProgress: '', aiBusy: true, aiProgress: 'Reading changes', aiCompleted: 1, aiTotal: 2, aiConfigured: true,
     commitHistory: null, commitsBusy: false, commitsError: '',
   }));
   assert.doesNotMatch(noReviewProgressHtml, /ai-review-progress|Reading changes/);
+  assert.match(noReviewProgressHtml, /Choose base branch/);
+  assert.ok(noReviewProgressHtml.indexOf('origin/main') < noReviewProgressHtml.indexOf('upstream/main'));
+  assert.ok(noReviewProgressHtml.indexOf('upstream/main') < noReviewProgressHtml.indexOf('Local branches'));
+  assert.doesNotMatch(noReviewProgressHtml, /role="option"[^>]*>[^<]*feature/);
+  assert.match(noReviewProgressHtml, /Create review/);
+  assert.doesNotMatch(noReviewProgressHtml, /Scan working tree/);
   const dockTask = beginAiTask({ kind: 'topic-review', projectId: project.id, projectName: project.name,
     reviewId: record.id, detail: 'Reading changes' });
   updateAiTask(dockTask, { completed: 1, total: 2 });
@@ -143,6 +150,16 @@ try {
   assert.match(commentedTopicsHtml, /class="is-high review-severity"/);
   assert.match(commentedTopicsHtml, /Copy a prompt for your coding agent/);
   assert.doesNotMatch(commentedTopicsHtml, /class="is-passing topic-recommendations"/);
+  const previousRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, comments: [],
+    previousComments: commentedRecord.aiReview!.comments, priorAssessments: {
+      'topic-1-1': { outcome: 'possibly-fixed', reason: 'The old call was removed.' },
+    }, revisions: [{ artifact: commentedRecord.aiReview!.artifact, reviewed: {}, comments: commentedRecord.aiReview!.comments, createdAt: 3 }] } };
+  const previousHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: previousRecord, data, settings: defaultGlobalSettings }));
+  assert.match(previousHtml, /Previous findings/);
+  assert.match(previousHtml, /Possibly fixed/);
+  assert.match(previousHtml, /Confirm resolved/);
+  assert.match(previousHtml, /Previous review versions/);
+  assert.doesNotMatch(previousHtml, /diff-review-comment/, 'Old line anchors must not be rendered on the current diff.');
   const passingRecord: ReviewRecord = { ...commentedRecord, aiReview: { ...commentedRecord.aiReview!, comments: [] } };
   const passingTopicsHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: passingRecord, data, settings: defaultGlobalSettings }));
   assert.match(passingTopicsHtml, /class="is-passing topic-recommendations"/);

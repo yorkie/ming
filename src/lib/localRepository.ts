@@ -203,7 +203,7 @@ export async function validateGitRepository(root: FileSystemDirectoryHandle): Pr
   }
 }
 
-export type RepositoryInfo = { currentBranch: string | null; branches: string[]; headOid: string | null; latestCommit: CommitSummary | null };
+export type RepositoryInfo = { currentBranch: string | null; branches: string[]; remoteBranches?: string[]; headOid: string | null; latestCommit: CommitSummary | null };
 
 export async function listGitHubRemotes(root: FileSystemDirectoryHandle): Promise<Array<{ remote: string; repository: GitHubRepository }>> {
   await validateGitRepository(root);
@@ -220,18 +220,21 @@ export async function inspectRepository(root: FileSystemDirectoryHandle): Promis
   await validateGitRepository(root);
   const fs = new BrowserRepositoryFs(root);
   const gitFs = fs as unknown as Parameters<typeof git.currentBranch>[0]['fs'];
-  const [currentBranch, branches, headOid] = await Promise.all([
+  const [currentBranch, branches, headOid, remotes] = await Promise.all([
     git.currentBranch({ fs: gitFs, dir: '/', fullname: false }).catch(() => null),
     git.listBranches({ fs: gitFs, dir: '/' }).catch(() => []),
     git.resolveRef({ fs: gitFs, dir: '/', ref: 'HEAD' }).catch(() => null),
+    git.listRemotes({ fs: gitFs, dir: '/' }).catch(() => []),
   ]);
+  const remoteBranches = (await Promise.all(remotes.map(({ remote }) =>
+    git.listBranches({ fs: gitFs, dir: '/', remote }).then(names => names.filter(name => name !== 'HEAD').map(name => `${remote}/${name}`)).catch(() => [])))).flat();
   const latestCommit = headOid ? await git.readCommit({ fs: gitFs, dir: '/', oid: headOid }).then(({ commit }) => ({
     oid: headOid,
     title: commit.message.split('\n')[0],
     author: commit.author.name,
     timestamp: commit.author.timestamp,
   })).catch(() => null) : null;
-  return { currentBranch: currentBranch ?? null, branches, headOid, latestCommit };
+  return { currentBranch: currentBranch ?? null, branches, remoteBranches, headOid, latestCommit };
 }
 
 export async function resolveComparisonRef(root: FileSystemDirectoryHandle, configuredRef: string, branch: string | null): Promise<string> {

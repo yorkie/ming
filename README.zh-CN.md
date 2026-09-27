@@ -13,17 +13,17 @@ AI 生成的摘要告诉你它打算做什么；Ming 展示它实际改了什么
 ### 项目亮点
 
 - **从 AI 总结走向代码证据。** Ming 将庞杂的 diff 整理成按目的划分的评审主题，每个主题都对应具体代码和检查要点。哪些已经评审、哪些需要再看、哪些未被 AI 分类，都由你决定。
-- **知道何时该重新评审。** Ming 打开期间会同步本地改动。diff 变化后，旧主题仍可查看，但会标记为过期，直到你重新生成。简短的 AI 标题也会在后台生成，不打断当前工作。
-- **保留最终决定权，也掌握自己的代码。** Ming 只读取仓库，不修改文件；项目与评审保存在浏览器中。Rust/WebAssembly harness 负责规划和校验 AI 任务；只有下文所述的任务会从浏览器直接向 DeepSeek 发送代码。
+- **保持评审连续。** 手动选择基准分支创建 Review 后，Ming 会自动同步本地改动。diff 变化时旧主题和评论标记为过期；增量更新会参考上一版，全量重做可从当前 diff 重新开始。
+- **保留最终决定权，也掌握自己的代码。** Ming 只读取仓库，不修改文件；项目与评审保存在浏览器中。Rust/WebAssembly harness 负责规划和校验 AI 任务；只有下文所述的任务会从浏览器直接向所选 AI 服务发送代码。
 
 ## 快速开始
 
 在近期版本的 Chromium 系浏览器中打开 [Ming](https://yorkie.github.io/ming/)。Ming 让你直接在浏览器中评审本地 Git 仓库：查看真实 diff、按需整理成 AI 主题，并记录评审决定。无需安装或注册 Ming 账号；浏览器询问时授予文件夹访问权限即可。
 
 1. 点击 **Add project**，选择包含 `.git` 目录的本地 Git 仓库根目录，并授予读取权限。
-2. 打开 **Reviews**。新项目默认开启实时更新，也可点击 **Scan changes** 手动刷新。默认与当前分支的本地远端跟踪引用比较；需要时可在项目设置中选择其他比较引用。
-3. 查看 **Changes** 和 **Commits**。如需使用 **Topics**，先在 **MING Console → Copilot** 配置 DeepSeek API 密钥，再点击 **Generate AI topics**。主题生成需要手动启动。
-4. 对照 diff 逐项评审主题，并标记为已评审或需要再看。diff 更新后，旧主题仍会显示，但会标记为过期，直到你重新生成。
+2. 打开 **Reviews**，选择基准分支并创建 Review。同一项目一次只能有一个进行中的 Review；创建后本地改动会自动更新，也可点击 **Scan changes** 手动刷新。
+3. 查看 **Changes** 和 **Commits**。如需使用 **Topics**，先在 **MING Console → Copilot** 配置 DeepSeek 或 OpenAI 官方 API；可点击 **Generate AI topics**，或在 **MING Console → Reviews** 开启“创建评审时自动生成主题”，首次保存 diff 后便会自动开始生成。
+4. 对照 diff 逐项评审主题。diff 更新后，旧主题和评论会标记为过期；更新 Topics 或重新 Request Review 时会参考上一版。操作菜单中提供全量重新生成主题和全量重新评审。完成后手动关闭并删除 Review，才能创建下一份。
 
 ### 关联 GitHub 仓库
 
@@ -33,7 +33,7 @@ AI 生成的摘要告诉你它打算做什么；Ming 展示它实际改了什么
 
 ### 适合这些场景
 
-**AI 刚完成一轮编码：** 扫描工作区、查看改动文件，再生成主题，集中评审相关修改。每个主题都能回到需要核查的代码。
+**AI 刚完成一轮编码：** 选择基准分支创建 Review、查看改动文件，再生成主题，集中评审相关修改。每个主题都能回到需要核查的代码。
 
 **代码还在持续变化：** Agent 或同事修改本地仓库时保持 Ming 页面打开。实时更新会刷新评审；过期提示会告诉你哪些旧主题需要重新检查。
 
@@ -48,14 +48,14 @@ AI 生成的摘要告诉你它打算做什么；Ming 展示它实际改了什么
 | File System Access API + `isomorphic-git` | 读取本地仓库、工作区和本地已有的 Git 引用 |
 | 扫描与 AI Worker | 在 UI 线程之外执行 Git 检查和模型请求 |
 | 编译为 WebAssembly 的 Rust `ming-core` | 解析 diff、计算快照哈希、规划有界 AI 任务并校验模型输出 |
-| IndexedDB | 保存项目句柄、每组分支对应的评审、主题、评审状态和 AI 用量 |
+| IndexedDB | 保存项目句柄、进行中的 Review、主题与评论版本、评审状态和 AI 用量 |
 | Vue 3 | 展示文件、差异、主题、后台任务和 MING Console |
 
 Ming 不会执行 Git fetch、push、commit、checkout，也不会修改仓库文件。它不需要自己的后端。Jev 加速是后续设计方向，目前尚未接入。
 
 ### 隐私与 AI 请求
 
-DeepSeek API 密钥和可选的 GitHub 个人访问令牌保存在当前浏览器的 local storage。配置 DeepSeek 密钥后，**扫描到变化的 diff 会自动将有界的差异上下文从浏览器直接发送给 DeepSeek，用于生成评审标题**。**只有你手动启动或重新启动主题任务时，已保存的 diff 才会发送给 DeepSeek 用于生成主题。** 当前 GitHub 配置不会向 GitHub 发送令牌或仓库文件。Ming 不会把仓库内容上传到 Ming 服务器。从 Ming 移除项目只会删除浏览器中的记录，不会删除磁盘上的仓库。
+DeepSeek、OpenAI API 密钥和可选的 GitHub 个人访问令牌保存在当前浏览器的 local storage。配置所选 AI 服务后，**进行中 Review 扫描到变化的 diff 会自动将有界的差异上下文从浏览器直接发送给该服务，用于生成评审标题**。**主题生成和 Request Review 需要手动启动；增量操作还会发送上一版的主题或评论作为上下文。** OpenAI 模型 ID 需支持流式 Chat Completions、JSON 模式与工具调用。当前 GitHub 配置不会向 GitHub 发送令牌或仓库文件。Ming 不会把仓库内容上传到 Ming 服务器。从 Ming 移除项目只会删除浏览器中的记录，不会删除磁盘上的仓库。
 
 ## 构建与贡献
 

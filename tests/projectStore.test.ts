@@ -77,6 +77,7 @@ assert.deepEqual(incremental.comments?.map(comment => comment.topicId).sort(), [
 assert.deepEqual(incremental.recommendations?.['topic-2'], ['Check the second path']);
 assert.deepEqual(incremental.recommendationSeverities?.['topic-1'], ['high']);
 assert.equal(incremental.comments?.find(comment => comment.topicId === 'topic-1')?.severity, 'high');
+assert.ok(incremental.comments?.every(comment => comment.id.startsWith(`${incremental.reviewRunId}:`)));
 assert.equal(await saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'old-diff', model: 'deepseek-flash', comments: [] }, 4, 'topic-1', []), null);
 await rememberReview(changedAgain);
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);
@@ -88,17 +89,43 @@ await rememberReview({ ...changedAgain, id: 'older-same-snapshot', createdAt: 5,
 const consolidated = await listReviews(project.id);
 assert.deepEqual(consolidated.map(review => review.id), ['review-1']);
 assert.equal(consolidated[0].aiReview?.reviewed['topic-2'], 'reviewed');
-await saveReviewSnapshot({ id: 'other-branch', projectId: project.id, createdAt: 4, branch: 'feature', baseRef: 'HEAD', data: '{"files":[]}' });
+await rememberReview({ id: 'legacy-other-branch', projectId: project.id, createdAt: 1,
+  branch: 'feature', baseRef: 'HEAD', data: '{"files":[]}' });
+assert.equal((await listReviews(project.id)).length, 2, 'Existing reviews on different source branches must not be discarded.');
+await deleteReview('legacy-other-branch');
+await assert.rejects(saveReviewSnapshot({ id: 'other-branch', projectId: project.id, createdAt: 4, branch: 'feature', baseRef: 'HEAD', data: '{"files":[]}' }), /Close it/);
+await assert.rejects(saveReviewSnapshot({ id: 'other-base', projectId: project.id, createdAt: 5, branch: 'main', baseRef: 'origin/main', data: '{"files":[]}' }), /Close the review/);
+assert.equal((await listReviews(project.id)).length, 1);
+await deleteReview('review-1');
 await saveReviewSnapshot({ id: 'other-base', projectId: project.id, createdAt: 5, branch: 'main', baseRef: 'origin/main', data: '{"files":[]}' });
-assert.equal((await listReviews(project.id)).length, 3);
 await deleteReview('other-base');
-assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1', 'other-branch']);
-await recordAiUsage({ id: 'request-1', projectId: project.id, projectName: project.name, reviewId: 'review-2', createdAt: 10,
+assert.deepEqual((await listReviews(project.id)).map(review => review.id), []);
+const usage = { id: 'request-1', projectId: project.id, projectName: project.name, reviewId: 'review-2', createdAt: 10,
   task: 'topic-review', provider: 'deepseek', model: 'deepseek-flash', group: 1, attempt: 1, status: 'success', httpStatus: 200,
-  promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedPromptTokens: 20 });
+  promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedPromptTokens: 20 } as const;
+await recordAiUsage(usage);
+const otherProject = { ...project, id: 'project-2', name: 'other' };
+await rememberProject(otherProject);
+await recordAiUsage({ ...usage, id: 'request-2', projectId: otherProject.id, projectName: otherProject.name });
 assert.equal((await listAiUsage())[0].totalTokens, 150);
 await deleteProject(project.id);
-assert.equal((await listProjects()).length, 0);
+assert.equal((await listProjects()).length, 1);
 assert.equal((await listReviews(project.id)).length, 0);
-assert.equal((await listAiUsage()).length, 1);
+assert.deepEqual((await listAiUsage()).map(record => record.id), ['request-2']);
+await recordAiUsage({ ...usage, id: 'late-request' });
+assert.deepEqual((await listAiUsage()).map(record => record.id), ['request-2']);
+await new Promise<void>((resolve, reject) => {
+  const request = indexedDB.open('ming-projects', 2);
+  request.onsuccess = () => {
+    const db = request.result;
+    const tx = db.transaction('aiUsage', 'readwrite');
+    tx.objectStore('aiUsage').put({ ...usage, id: 'orphan-request' });
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  };
+  request.onerror = () => reject(request.error);
+});
+assert.deepEqual((await listAiUsage()).map(record => record.id), ['request-2']);
+await deleteProject(otherProject.id);
+assert.deepEqual(await listAiUsage(), []);
 console.log('Project storage integration test passed');

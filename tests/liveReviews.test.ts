@@ -93,11 +93,13 @@ Object.assign(globalThis, {
   },
 });
 
-const { rememberProject } = await import('../src/lib/projectStore');
+const { rememberProject, rememberReview, listReviews } = await import('../src/lib/projectStore');
 const { liveReviewStatuses, pauseLiveReviewForScan, refreshLiveReviews, startLiveReviews, stopLiveReviews } = await import('../src/lib/liveReviews');
 for (const [index, name] of ['ming', 'ink'].entries()) {
   await rememberProject({ id: name, name, directory: directory(name),
     addedAt: index, settings: { baseRef: 'HEAD', liveReview: true } } satisfies Project);
+  await rememberReview({ id: `review-${name}`, projectId: name, createdAt: index, branch: 'main', baseRef: 'HEAD',
+    data: '{"files":[],"additions":0,"deletions":0}' });
 }
 async function until(check: () => boolean) {
   for (let attempt = 0; attempt < 100 && !check(); attempt++) await new Promise(resolve => setTimeout(resolve, 5));
@@ -118,6 +120,7 @@ try {
   observers.get('ming')!([{ type: 'modified', relativePathComponents: ['src', 'seed.rs'] }]);
   await until(() => scanned.length === 2 && liveReviewStatuses.get('ink')?.phase === 'watching');
   assert.deepEqual(scanned.sort(), ['ink', 'ming']);
+  assert.equal((await listReviews('ink')).length, 1, 'An empty diff must keep the active review until explicit deletion.');
   assert.equal(liveReviewStatuses.get('ink')?.mode, 'observer');
   const prepared = await pauseLiveReviewForScan('ink', new AbortController().signal);
   assert.equal(prepared.cached?.hadData, false, 'Manual scan should reuse a completed observed scan.');
@@ -150,8 +153,19 @@ try {
   await until(() => scanned.length === 5 && liveReviewStatuses.get('ink')?.phase === 'polling');
   assert.equal(scanned.at(-1), 'ink', 'Timer catch-up must not scan the other project.');
   assert.equal(requests.at(-1)?.filepaths, undefined, 'Timer fallback requires a full scan.');
+  await rememberProject({ id: 'idle', name: 'idle', directory: directory('idle'),
+    addedAt: 2, settings: { baseRef: 'HEAD', liveReview: true } } satisfies Project);
+  await refreshLiveReviews();
+  await until(() => observers.has('idle'));
+  const beforeIdle = scanned.length;
+  observers.get('idle')!([{ type: 'modified', relativePathComponents: ['src', 'changed.rs'] }]);
+  await until(() => liveReviewStatuses.get('idle')?.phase === 'watching');
+  assert.equal(scanned.length, beforeIdle, 'Live updates must not create an unrequested review.');
+  assert.equal((await listReviews('idle')).length, 0);
   await rememberProject({ id: 'gitmeta', name: 'gitmeta', directory: { kind: 'directory', name: 'gitmeta', rootPath: gitRoot } as unknown as FileSystemDirectoryHandle,
     addedAt: 3, settings: { baseRef: 'baseline', liveReview: true } } satisfies Project);
+  await rememberReview({ id: 'review-gitmeta', projectId: 'gitmeta', createdAt: 3, branch: 'main', baseRef: 'baseline',
+    data: '{"files":[],"additions":0,"deletions":0}' });
   await refreshLiveReviews();
   await until(() => observers.has('gitmeta'));
   const beforeMetadata = scanned.length;
@@ -179,6 +193,8 @@ try {
   assert.equal(requests.at(-1)?.filepaths, undefined, 'A changed comparison ref requires a full diff.');
   await rememberProject({ id: 'slow', name: 'slow', directory: directory('slow'),
     addedAt: 4, settings: { baseRef: 'HEAD', liveReview: true } } satisfies Project);
+  await rememberReview({ id: 'review-slow', projectId: 'slow', createdAt: 4, branch: 'main', baseRef: 'HEAD',
+    data: '{"files":[],"additions":0,"deletions":0}' });
   await refreshLiveReviews();
   await until(() => observers.has('slow'));
   observers.get('slow')!([{ type: 'modified', relativePathComponents: ['src', 'changed.rs'] }]);

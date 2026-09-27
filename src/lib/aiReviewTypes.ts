@@ -26,8 +26,23 @@ export type TopicReview = {
   sourceData?: string;
   comments?: ReviewComment[];
   commentsCreatedAt?: number;
+  reviewRunId?: string;
   recommendations?: Record<string, string[]>;
   recommendationSeverities?: Record<string, (ReviewSeverity | null)[]>;
+  revisions?: TopicReviewRevision[];
+  previousComments?: ReviewComment[];
+  priorAssessments?: Record<string, { outcome: 'still-present' | 'possibly-fixed' | 'unclear'; reason: string }>;
+  commentDecisions?: Record<string, 'resolved' | 'open'>;
+};
+
+export type TopicReviewRevision = {
+  artifact: TopicArtifact;
+  sourceData?: string;
+  reviewed: Record<string, 'reviewed' | 'needs-work'>;
+  comments?: ReviewComment[];
+  recommendations?: Record<string, string[]>;
+  commentDecisions?: Record<string, 'resolved' | 'open'>;
+  createdAt: number;
 };
 
 export type ReviewSeverity = 'high' | 'medium' | 'low';

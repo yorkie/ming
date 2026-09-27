@@ -1,9 +1,10 @@
 import { strict as assert } from 'node:assert';
 import { localizeAiProgress } from '../src/lib/aiProgress';
 import { readDeepSeekStream, readDeepSeekToolStream } from '../src/lib/deepSeekStream';
-import { deepSeekRequestError } from '../src/lib/deepSeekError';
+import { chatCompletionRequestError } from '../src/lib/deepSeekError';
+import { cachedPromptTokens } from '../src/lib/chatUsage';
 import { buildAiStory, describeToolCall, describeToolResult, findingFromCall, formatWorkDuration } from '../src/lib/aiActivity';
-import { splitReviewPrompt } from '../src/lib/reviewPromptChunks';
+import { addReviewPromptContext, splitReviewPrompt } from '../src/lib/reviewPromptChunks';
 import { parseReviewComments } from '../src/lib/reviewResponse';
 import { runConcurrentReviews } from '../src/lib/concurrentReview';
 
@@ -30,6 +31,8 @@ assert.deepEqual(parseReviewComments('{"comments":[]}'), { comments: [] });
 assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":" Check callers "}'), { comments: [], recommendation: 'Check callers' });
 assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":"Fix callers","recommendationSeverity":"high"}'),
   { comments: [], recommendation: 'Fix callers', recommendationSeverity: 'high' });
+assert.deepEqual(parseReviewComments('{"comments":[],"priorFindings":[{"id":"old-1","outcome":"possibly-fixed","reason":"The old call is gone."},{"id":"old-2","outcome":"resolved","reason":"Invalid certainty"}]}').priorFindings,
+  [{ id: 'old-1', outcome: 'possibly-fixed', reason: 'The old call is gone.' }]);
 assert.throws(() => parseReviewComments('{"comments":[{"body":"bad",}]}'), /double-quoted property name|Unexpected token/);
 assert.throws(() => parseReviewComments('{"status":"ok"}'), /comments array/);
 
@@ -39,6 +42,8 @@ assert.ok(reviewChunks.length > 1);
 assert.ok(reviewChunks.every(chunk => chunk.includes('Check callers')));
 assert.ok(reviewChunks.some(chunk => chunk.includes('src/a.ts') && chunk.includes('RIGHT:2 +second')));
 assert.ok(reviewChunks.some(chunk => chunk.includes('src/b.ts') && chunk.includes('RIGHT:1 +third')));
+const contextualChunks = splitReviewPrompt(addReviewPromptContext(reviewPrompt, 'Previous finding old-1'), 85);
+assert.ok(contextualChunks.every(chunk => chunk.includes('Previous finding old-1')));
 const forcedReviewChunks = splitReviewPrompt(reviewPrompt, 12_000, true);
 assert.ok(forcedReviewChunks.length > 1);
 assert.ok(forcedReviewChunks.every(chunk => chunk.includes('Check callers')));
@@ -71,10 +76,12 @@ const truncated = new ReadableStream<Uint8Array>({ start(controller) {
   controller.close();
 } });
 assert.equal((await readDeepSeekStream(truncated, () => {})).finishReason, 'length');
-assert.match((await deepSeekRequestError(new Response(JSON.stringify({ error: { message: 'context length exceeded' } }), { status: 400 }), 'global topic')).message,
+assert.match((await chatCompletionRequestError(new Response(JSON.stringify({ error: { message: 'context length exceeded' } }), { status: 400 }), 'global topic', 'OpenAI')).message,
   /global topic request failed \(400\): context length exceeded/);
-assert.equal((await deepSeekRequestError(new Response('unavailable', { status: 503 }), 'topic')).message,
+assert.equal((await chatCompletionRequestError(new Response('unavailable', { status: 503 }), 'topic', 'DeepSeek')).message,
   'DeepSeek topic request failed (503).');
+assert.equal(cachedPromptTokens({ prompt_tokens_details: { cached_tokens: 42 } }), 42);
+assert.equal(cachedPromptTokens({ prompt_cache_hit_tokens: 8 }), 8);
 const interrupted = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"choices":[]}\n\n')); controller.close(); } });
 await assert.rejects(readDeepSeekStream(interrupted, () => {}), /ended before completion/);
 const toolEvents = [
