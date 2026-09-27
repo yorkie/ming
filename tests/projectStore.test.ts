@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { strict as assert } from 'node:assert';
-import { clearTopicReviewResultsIfCurrent, deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveAiReviewIfCurrent, saveReviewCommentsIfCurrent, saveReviewSnapshot, saveReviewTitleIfCurrent, saveTopicReviewResultIfCurrent, topicsAreStale, type Project } from '../src/lib/projectStore';
+import { clearTopicReviewResultsIfCurrent, completeReviewChangeEvent, deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveAiReviewIfCurrent, saveCommentDecision, saveReviewCommentsIfCurrent, saveReviewSnapshot, saveReviewTitleIfCurrent, saveTopicReviewResultIfCurrent, topicsAreStale, type Project } from '../src/lib/projectStore';
+import { commentResolved } from '../src/lib/reviewContinuity';
+import { changeEventsForReview } from '../src/lib/reviewTimeline';
 
 await new Promise<void>((resolve, reject) => {
   const request = indexedDB.open('ming-projects', 1);
@@ -79,6 +81,17 @@ assert.deepEqual(incremental.recommendationSeverities?.['topic-1'], ['high']);
 assert.equal(incremental.comments?.find(comment => comment.topicId === 'topic-1')?.severity, 'high');
 assert.ok(incremental.comments?.every(comment => comment.id.startsWith(`${incremental.reviewRunId}:`)));
 assert.equal(await saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'old-diff', model: 'deepseek-flash', comments: [] }, 4, 'topic-1', []), null);
+const findingId = incremental.comments![0].id;
+assert.equal((await saveCommentDecision(changedAgain.id, findingId, 'resolved'))?.commentDecisions?.[findingId], 'resolved');
+const nextRun = await clearTopicReviewResultsIfCurrent(changedAgain.id, 4);
+assert.ok(nextRun?.previousComments?.some(comment => comment.id === findingId), 'Resolved comments remain in history.');
+assert.equal(nextRun?.commentDecisions?.[findingId], 'resolved');
+const assessed = await saveTopicReviewResultIfCurrent(changedAgain.id,
+  { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash', comments: [] }, 4, 'topic-1', [], [],
+  { [findingId]: { outcome: 'resolved', reason: 'The caller now handles the error.' } });
+assert.equal(assessed?.priorAssessments?.[findingId]?.outcome, 'resolved');
+assert.equal(commentResolved(assessed!, findingId), true);
+assert.equal(commentResolved((await saveCommentDecision(changedAgain.id, findingId, 'open'))!, findingId), false);
 await rememberReview(changedAgain);
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);
 await rememberReview({ id: 'legacy-duplicate', projectId: project.id, createdAt: 2, branch: 'main', baseRef: 'HEAD', data: '{"files":[]}' });
@@ -100,6 +113,55 @@ await deleteReview('review-1');
 await saveReviewSnapshot({ id: 'other-base', projectId: project.id, createdAt: 5, branch: 'main', baseRef: 'origin/main', data: '{"files":[]}' });
 await deleteReview('other-base');
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), []);
+const timelineFile = (path: string, text: string) => ({ path, status: 'modified', additions: 1, deletions: 0,
+  hunks: [{ header: '@@ -0,0 +1 @@', lines: [{ kind: 'add', text, oldNumber: null, newNumber: 1 }] }] });
+const timelineSnapshot = (id: string, createdAt: number, snapshotHash: string, files: ReturnType<typeof timelineFile>[]) => ({
+  id, projectId: project.id, createdAt, branch: 'main', baseRef: 'origin/main', snapshotHash,
+  data: JSON.stringify({ files, additions: files.length, deletions: 0 }),
+});
+const firstTimeline = await saveReviewSnapshot(timelineSnapshot('timeline-1', 10, 'hash-1', [timelineFile('src/a.ts', 'one')]));
+assert.deepEqual(firstTimeline.changeEvents?.map(event => event.paths), [['src/a.ts']]);
+const secondTimeline = await saveReviewSnapshot(timelineSnapshot('timeline-2', 11, 'hash-2', [timelineFile('src/a.ts', 'two')]));
+assert.equal(secondTimeline.changeEvents?.length, 1);
+assert.equal(secondTimeline.changeEvents?.[0]?.changeCount, 2);
+const noChangeTimeline = await saveReviewSnapshot(timelineSnapshot('timeline-3', 12, 'hash-2', [timelineFile('src/a.ts', 'two')]));
+assert.equal(noChangeTimeline.changeEvents?.[0]?.changeCount, 2, 'An unchanged scan must not add a change.');
+const reviewedTimeline = await completeReviewChangeEvent(firstTimeline.id, 'hash-2', 13);
+assert.equal(reviewedTimeline?.changeEvents?.[0]?.reviewedAt, 13);
+const thirdTimeline = await saveReviewSnapshot(timelineSnapshot('timeline-4', 14, 'hash-3', [timelineFile('src/a.ts', 'two'), timelineFile('src/b.ts', 'new')]));
+assert.equal(thirdTimeline.changeEvents?.length, 2, 'Changes after a completed review start a new timeline node.');
+assert.deepEqual(thirdTimeline.changeEvents?.[1]?.paths, ['src/b.ts']);
+const fourthTimeline = await saveReviewSnapshot(timelineSnapshot('timeline-5', 15, 'hash-4', [timelineFile('src/a.ts', 'three'), timelineFile('src/b.ts', 'new')]));
+assert.equal(fourthTimeline.changeEvents?.length, 2);
+assert.equal(fourthTimeline.changeEvents?.[1]?.changeCount, 2);
+assert.deepEqual(fourthTimeline.changeEvents?.[1]?.paths.sort(), ['src/a.ts', 'src/b.ts']);
+await deleteReview(firstTimeline.id);
+const legacyArtifact = { schemaVersion: 1 as const, snapshotHash: 'legacy-hash', model: 'deepseek-flash',
+  topics: [{ id: 'topic-1', title: 'Legacy', summary: '', checks: [], unitIds: ['f0'] }] };
+const legacyTimeline = { ...timelineSnapshot('legacy-timeline', 100, 'legacy-hash', [timelineFile('src/a.ts', 'new')]),
+  updatedAt: 300, aiReview: { artifact: legacyArtifact, createdAt: 110, reviewed: {}, commentsCreatedAt: 200,
+    comments: [], recommendations: { 'topic-1': [] } } };
+await rememberReview(legacyTimeline);
+assert.equal(changeEventsForReview(legacyTimeline)[0]?.updatedAt, 300);
+assert.equal(changeEventsForReview(legacyTimeline)[0]?.reviewedAt, undefined);
+assert.ok(await clearTopicReviewResultsIfCurrent(legacyTimeline.id, 110));
+let inProgress = (await listReviews(project.id))[0];
+assert.equal(inProgress.changeEvents?.[0]?.updatedAt, 300, 'Starting a review must preserve the pending change time.');
+assert.equal(inProgress.changeEvents?.[0]?.reviewedAt, undefined);
+assert.ok(await saveTopicReviewResultIfCurrent(legacyTimeline.id,
+  { schemaVersion: 1, snapshotHash: 'legacy-hash', model: 'deepseek-flash', comments: [] }, 110, 'topic-1', []));
+inProgress = (await listReviews(project.id))[0];
+assert.equal(inProgress.changeEvents?.[0]?.updatedAt, 300);
+assert.equal(inProgress.changeEvents?.[0]?.reviewedAt, undefined, 'A partial topic result must not close the change node.');
+const completedLegacy = await completeReviewChangeEvent(legacyTimeline.id, 'legacy-hash', 400);
+assert.equal(completedLegacy?.changeEvents?.[0]?.updatedAt, 300);
+assert.equal(completedLegacy?.changeEvents?.[0]?.reviewedAt, 400);
+const brokenLegacy = { ...legacyTimeline, aiReview: { ...legacyTimeline.aiReview, commentsCreatedAt: 400,
+  revisions: [{ artifact: legacyArtifact, reviewed: {}, createdAt: 200, commentsCreatedAt: 200 }] },
+  changeEvents: [{ id: 'bad-legacy-event', startedAt: 100, updatedAt: 100, changeCount: 1,
+    paths: ['src/a.ts'], snapshotHash: 'legacy-hash', reviewedAt: 400 }] };
+assert.equal(changeEventsForReview(brokenLegacy)[0]?.updatedAt, 300, 'Repair the legacy event time saved at review creation.');
+await deleteReview(legacyTimeline.id);
 const usage = { id: 'request-1', projectId: project.id, projectName: project.name, reviewId: 'review-2', createdAt: 10,
   task: 'topic-review', provider: 'deepseek', model: 'deepseek-flash', group: 1, attempt: 1, status: 'success', httpStatus: 200,
   promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedPromptTokens: 20 } as const;

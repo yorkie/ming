@@ -31,8 +31,9 @@ assert.deepEqual(parseReviewComments('{"comments":[]}'), { comments: [] });
 assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":" Check callers "}'), { comments: [], recommendation: 'Check callers' });
 assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":"Fix callers","recommendationSeverity":"high"}'),
   { comments: [], recommendation: 'Fix callers', recommendationSeverity: 'high' });
-assert.deepEqual(parseReviewComments('{"comments":[],"priorFindings":[{"id":"old-1","outcome":"possibly-fixed","reason":"The old call is gone."},{"id":"old-2","outcome":"resolved","reason":"Invalid certainty"}]}').priorFindings,
-  [{ id: 'old-1', outcome: 'possibly-fixed', reason: 'The old call is gone.' }]);
+assert.deepEqual(parseReviewComments('{"comments":[],"priorFindings":[{"id":"old-1","outcome":"possibly-fixed","reason":"The old call is gone."},{"id":"old-2","outcome":"resolved","reason":"The current code handles the error."}]}').priorFindings,
+  [{ id: 'old-1', outcome: 'possibly-fixed', reason: 'The old call is gone.' },
+    { id: 'old-2', outcome: 'resolved', reason: 'The current code handles the error.' }]);
 assert.throws(() => parseReviewComments('{"comments":[{"body":"bad",}]}'), /double-quoted property name|Unexpected token/);
 assert.throws(() => parseReviewComments('{"status":"ok"}'), /comments array/);
 

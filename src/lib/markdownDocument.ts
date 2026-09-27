@@ -3,6 +3,7 @@ import sanitizeHtml from 'sanitize-html';
 
 const documentMarkdown = new MarkdownIt({ html: true, linkify: false, maxNesting: 20 });
 const inlineMarkdown = new MarkdownIt({ html: false, linkify: false, maxNesting: 10 });
+const reviewCommentMarkdown = new MarkdownIt({ html: false, linkify: false, breaks: true, maxNesting: 10 });
 
 export function renderMarkdownInline(source: string): string {
   return sanitizeHtml(inlineMarkdown.renderInline(source), {
@@ -20,6 +21,13 @@ export function renderTopicSummary(source: string): string {
   return sanitizeHtml(inlineMarkdown.render(content), {
     allowedTags: ['p', 'ul', 'ol', 'li', 'br', 'code', 'em', 's', 'strong'],
     allowedAttributes: {},
+  });
+}
+
+export function renderReviewComment(source: string): string {
+  return sanitizeHtml(reviewCommentMarkdown.render(source), {
+    allowedTags: ['p', 'br', 'pre', 'code', 'blockquote', 'ul', 'ol', 'li', 'a', 'em', 's', 'strong'],
+    allowedAttributes: { a: ['href', 'title'], code: ['class'] },
   });
 }
 

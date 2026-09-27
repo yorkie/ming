@@ -1,4 +1,6 @@
 import type { ReviewCommentArtifact, ReviewSeverity, ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
+import { historicalComments } from './reviewContinuity';
+import { changeEventsForReview, nextChangeEvents, type ChangeEvent } from './reviewTimeline';
 export type ProjectSettings = { baseRef: string; liveReview?: boolean; githubRepository?: string };
 export type Project = {
   id: string;
@@ -20,6 +22,7 @@ export type ReviewRecord = {
   snapshotHash?: string;
   title?: string;
   aiReview?: TopicReview;
+  changeEvents?: ChangeEvent[];
 };
 export function topicsAreStale(review: ReviewRecord): boolean {
   if (!review.aiReview) return false;
@@ -166,6 +169,46 @@ export async function saveReviewCommentsIfCurrent(id: string, artifact: ReviewCo
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
+export async function saveCommentDecision(id: string, commentId: string, status: 'resolved' | 'open'): Promise<TopicReview | null> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved: TopicReview | null = null;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      const review = current?.aiReview;
+      if (!review || !historicalComments(review).some(comment => comment.id === commentId)) return;
+      saved = { ...review, commentDecisions: { ...review.commentDecisions, [commentId]: status } };
+      store.put({ ...current, aiReview: saved });
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+export async function completeReviewChangeEvent(id: string, snapshotHash: string | undefined, completedAt: number): Promise<ReviewRecord | null> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved: ReviewRecord | null = null;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (!current || current.snapshotHash !== snapshotHash) return;
+      const events = changeEventsForReview(current);
+      const latest = events.at(-1);
+      if (!latest || latest.reviewedAt) { saved = current; return; }
+      saved = { ...current, changeEvents: [...events.slice(0, -1), { ...latest, reviewedAt: completedAt }] };
+      store.put(saved);
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
 export async function saveTopicReviewResultIfCurrent(id: string, artifact: ReviewCommentArtifact, topicsCreatedAt: number,
   topicId: string, recommendations: string[], recommendationSeverities: (ReviewSeverity | null)[] = [],
   assessments: NonNullable<TopicReview['priorAssessments']> = {}): Promise<TopicReview | null> {
@@ -195,7 +238,7 @@ export async function saveTopicReviewResultIfCurrent(id: string, artifact: Revie
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
-export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreatedAt: number, full = false): Promise<TopicReview | null> {
+export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreatedAt: number): Promise<TopicReview | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('reviews', 'readwrite');
@@ -206,14 +249,14 @@ export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreated
       const current = request.result as ReviewRecord | undefined;
       if (!current?.aiReview || topicsAreStale(current) || current.aiReview.createdAt !== topicsCreatedAt) return;
       const prior = current.aiReview;
-      const previousComments = full ? [] : [...new Map([...(prior.previousComments ?? []), ...(prior.comments ?? [])]
-        .filter(comment => prior.commentDecisions?.[comment.id] !== 'resolved').map(comment => [comment.id, comment])).values()];
+      const previousComments = historicalComments(prior);
       saved = { ...prior, comments: [], reviewRunId: crypto.randomUUID(), previousComments,
-        recommendations: {}, recommendationSeverities: {}, priorAssessments: {}, commentsCreatedAt: undefined,
+        recommendations: {}, recommendationSeverities: {}, commentsCreatedAt: undefined,
         revisions: prior.commentsCreatedAt ? [...(prior.revisions ?? []), { artifact: prior.artifact, sourceData: prior.sourceData,
           reviewed: prior.reviewed, comments: prior.comments, recommendations: prior.recommendations,
-          commentDecisions: prior.commentDecisions, createdAt: prior.commentsCreatedAt ?? Date.now() }] : prior.revisions };
-      store.put({ ...current, aiReview: saved });
+          commentDecisions: prior.commentDecisions, createdAt: prior.commentsCreatedAt ?? Date.now(),
+          commentsCreatedAt: prior.commentsCreatedAt }] : prior.revisions };
+      store.put({ ...current, aiReview: saved, changeEvents: changeEventsForReview(current) });
     };
     tx.oncomplete = () => { db.close(); resolve(saved); };
     tx.onabort = () => { db.close(); reject(tx.error); };
@@ -301,6 +344,7 @@ export async function saveReviewSnapshot(review: ReviewRecord): Promise<ReviewRe
       const previousTopics = matchingTopics ?? matches.find(item => item.aiReview);
       saved = { ...review, id: matches[0]?.id ?? review.id, createdAt: matches[0]?.createdAt ?? review.createdAt,
         updatedAt: review.createdAt,
+        changeEvents: nextChangeEvents(matches[0], review, !!matches[0] && sameSnapshot(matches[0], review)),
         title: matchingTitle?.title,
         aiReview: previousTopics?.aiReview && {
           ...previousTopics.aiReview,

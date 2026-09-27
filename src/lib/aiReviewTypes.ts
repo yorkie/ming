@@ -21,6 +21,7 @@ export type ReviewTitleArtifact = {
 
 export type TopicReview = {
   artifact: TopicArtifact;
+  outdatedTopics?: Record<string, string>;
   reviewed: Record<string, 'reviewed' | 'needs-work'>;
   createdAt: number;
   sourceData?: string;
@@ -31,7 +32,7 @@ export type TopicReview = {
   recommendationSeverities?: Record<string, (ReviewSeverity | null)[]>;
   revisions?: TopicReviewRevision[];
   previousComments?: ReviewComment[];
-  priorAssessments?: Record<string, { outcome: 'still-present' | 'possibly-fixed' | 'unclear'; reason: string }>;
+  priorAssessments?: Record<string, { outcome: 'still-present' | 'possibly-fixed' | 'resolved' | 'unclear'; reason: string }>;
   commentDecisions?: Record<string, 'resolved' | 'open'>;
 };
 
@@ -43,6 +44,7 @@ export type TopicReviewRevision = {
   recommendations?: Record<string, string[]>;
   commentDecisions?: Record<string, 'resolved' | 'open'>;
   createdAt: number;
+  commentsCreatedAt?: number;
 };
 
 export type ReviewSeverity = 'high' | 'medium' | 'low';

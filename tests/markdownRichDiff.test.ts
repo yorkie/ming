@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { markdownSnapshotForHunks, renderMarkdownRichDiff } from '../src/lib/markdownRichDiff';
-import { renderMarkdownDocument, renderMarkdownInline, renderTopicSummary } from '../src/lib/markdownDocument';
+import { renderMarkdownDocument, renderMarkdownInline, renderReviewComment, renderTopicSummary } from '../src/lib/markdownDocument';
 
 const rich = renderMarkdownRichDiff({
   before: '# Guide\n\nOld paragraph.\n',
@@ -61,4 +61,9 @@ const legacySummary = `修改核心行为。数据层：${'状态字段。'.repe
 assert.match(renderTopicSummary(legacySummary), /<p>修改核心行为。<\/p>\s*<p>数据层：/);
 assert.match(renderTopicSummary(legacySummary), /<p>逻辑层：调用新工具；<\/p>/);
 assert.doesNotMatch(renderTopicSummary('- <script>alert(1)</script>'), /<script>/);
+const comment = renderReviewComment('Check `events.map(e => e.type)` and **retry**.\n\n```ts\nconst event = { type: "speech.end" };\n```');
+assert.match(comment, /<code>events\.map\(e =&gt; e\.type\)<\/code>/);
+assert.match(comment, /<strong>retry<\/strong>/);
+assert.match(comment, /<pre><code class="language-ts">const event = \{ type: "speech\.end" \};/);
+assert.doesNotMatch(renderReviewComment('<img src=x onerror=alert(1)> [bad](javascript:alert(1))'), /<img|href="javascript:/);
 console.log('Markdown rich diff test passed');

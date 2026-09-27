@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { inspectRepository, resolveComparisonOid, resolveComparisonRef, type CommitHistory, type RepositoryInfo } from '../lib/localRepository';
-import { clearTopicReviewResultsIfCurrent, deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveTopicReviewResultIfCurrent, saveReviewSnapshot, topicsAreStale, type Project, type ReviewRecord } from '../lib/projectStore';
+import { clearTopicReviewResultsIfCurrent, completeReviewChangeEvent, deleteProject, deleteReview, listProjects, listReviews, recordAiUsage, rememberProject, saveAiReviewIfCurrent, saveCommentDecision, saveTopicReviewResultIfCurrent, saveReviewSnapshot, topicsAreStale, type Project, type ReviewRecord } from '../lib/projectStore';
 import { copilotConnection, copilotIsConfigured } from '../lib/copilotProvider';
 import { generateReviewTitleInBackground } from '../lib/reviewTitles';
 import { parseRoute, resolveId, routeUrl, shortId, type Route } from '../lib/routes';
@@ -19,6 +19,7 @@ import { pauseLiveReview, pauseLiveReviewForScan } from '../lib/liveReviews';
 import { parseGitHubRepository } from '../lib/githubRepository';
 import { aiTasks, beginAiTask, finishAiTask, isAiTaskRunning, updateAiTask } from '../lib/aiTasks';
 import { nextTopicReview } from '../lib/incrementalReview';
+import { activeTopicArtifact, unresolvedHistoricalComments } from '../lib/reviewContinuity';
 import { clearLastOpenedReview, rememberOpenedReview } from '../lib/reviewShortcut';
 
 type View = 'files' | 'reviews' | 'branches' | 'settings';
@@ -322,6 +323,12 @@ function cancelScan() { cancelActiveScan?.(); }
 function cancelAi() { cancelAiReview?.(); }
 function cancelRequestedReview() { cancelReviewRequest?.(); }
 async function requestReview(full = false) {
+  if (reviewRequestBusy.value || !record.value || aiActionsBusy.value || scanBusy.value) return;
+  reviewRequestBusy.value = true;
+  try { await runReviewRequest(full); }
+  finally { reviewRequestBusy.value = false; }
+}
+async function runReviewRequest(full = false) {
   let selected = record.value;
   if (!selected || aiActionsBusy.value || scanBusy.value) return;
   if (!(JSON.parse(selected.data) as Review).files.length) return note('There are no changes to review.', true);
@@ -339,13 +346,12 @@ async function requestReview(full = false) {
   catch { note('Could not read the saved diff for review.', true); return; }
   const resumeLiveReview = await pauseLiveReview(selected.projectId);
   let cleared;
-  try { cleared = await clearTopicReviewResultsIfCurrent(selected.id, selected.aiReview.createdAt, full); }
+  try { cleared = await clearTopicReviewResultsIfCurrent(selected.id, selected.aiReview.createdAt); }
   catch (error) { resumeLiveReview(); note(error instanceof Error ? error.message : String(error), true); return; }
   if (!cleared) { resumeLiveReview(); note(t('Topics changed during review. Request review again.'), true); return; }
   reviews.value = reviews.value.map(item => item.id === selected.id ? { ...item, aiReview: cleared } : item);
-  reviewRequestBusy.value = true;
   reviewRequestCompleted.value = 0;
-  reviewRequestTotal.value = selected.aiReview.artifact.topics.length;
+  reviewRequestTotal.value = activeTopicArtifact(cleared).topics.length;
   message.value = '';
   const worker = new Worker(new URL('../workers/requestReviewWorker.ts', import.meta.url), { type: 'module' });
   const taskId = beginAiTask({ kind: 'request-review', projectId: selected.projectId, projectName: project.value?.name ?? 'Project',
@@ -380,15 +386,19 @@ async function requestReview(full = false) {
         else { const error = new Error(event.data.message); void Promise.allSettled([...usageWrites, topicWrites]).then(() => reject(error)); }
       };
       worker.onerror = event => reject(new Error(event.message || 'Review worker stopped unexpectedly'));
-      worker.postMessage({ review: source, artifact: selected.aiReview!.artifact, previousComments: full ? [] : cleared.previousComments ?? [], connection,
+      worker.postMessage({ review: source, artifact: activeTopicArtifact(cleared), previousComments: unresolvedHistoricalComments(cleared), connection,
         reviewLanguage: copilot.copilotReviewLanguage, concurrency: copilot.copilotReviewConcurrency });
     });
+    try {
+      const completed = await completeReviewChangeEvent(selected.id, selected.snapshotHash, Date.now());
+      if (completed) reviews.value = reviews.value.map(item => item.id === completed.id ? completed : item);
+    } catch (error) { console.warn('Could not save review timeline:', error); }
     finishAiTask(taskId, 'done', language.value === 'zh-CN' ? `代码评审完成，生成 ${commentCount} 条意见。` : `Review completed with ${commentCount} comments.`);
     window.dispatchEvent(new CustomEvent('ming:reviews-changed', { detail: { projectId: selected.projectId } }));
   } catch (error) {
     const canceled = error instanceof DOMException && error.name === 'AbortError';
     finishAiTask(taskId, canceled ? 'canceled' : 'error', canceled ? t('Canceled') : `${language.value === 'zh-CN' ? '代码评审失败' : 'Review failed'}: ${error instanceof Error ? error.message : String(error)}`);
-  } finally { worker.terminate(); cancelReviewRequest = null; reviewRequestBusy.value = false; resumeLiveReview(); }
+  } finally { worker.terminate(); cancelReviewRequest = null; resumeLiveReview(); }
 }
 async function generateAiReview(reviewId?: string, full = false): Promise<boolean> {
   const selected = reviewId ? reviews.value.find(item => item.id === reviewId) : record.value;
@@ -470,10 +480,10 @@ async function markTopic(id: string, status: 'reviewed' | 'needs-work' | null) {
 }
 async function markComment(id: string, status: 'resolved' | 'open') {
   const selected = record.value;
-  if (!selected?.aiReview || topicsAreStale(selected) || !selected.aiReview.previousComments?.some(comment => comment.id === id)) return;
-  const aiReview = { ...selected.aiReview, commentDecisions: { ...selected.aiReview.commentDecisions, [id]: status } };
+  if (!selected?.aiReview) return;
   try {
-    if (!await saveAiReviewIfCurrent(selected.id, selected.snapshotHash, aiReview, selected.data)) return;
+    const aiReview = await saveCommentDecision(selected.id, id, status);
+    if (!aiReview) return;
     reviews.value = reviews.value.map(item => item.id === selected.id ? { ...item, aiReview } : item);
   } catch (error) { note(`Could not save comment status: ${error instanceof Error ? error.message : String(error)}`, true); }
 }
@@ -511,7 +521,7 @@ onUnmounted(() => { window.removeEventListener('ming:reviews-changed', onLiveRev
     <div v-if="!project" class="empty-state"><h3>Project not found</h3><p>Select a project from the Projects page.</p><button class="button-outline" @click="navigate({ kind: 'home' })">Projects</button></div>
     <div v-else-if="permissionRequired" class="empty-state"><h3>Project access required</h3><p>Grant read access to open this project. Ming will not modify its files.</p><button class="button-primary" @click="applyRoute(true)">Grant access</button></div>
     <FilesView v-else-if="view === 'files'" :project="project" :git-info="gitInfo" :path="filePath" :data="fileView?.data ?? null" :busy="filesBusy" :error="filesError" :settings="settings" @navigate="selectFilePath" @refresh="refreshFiles" />
-    <ReviewsView v-else-if="view === 'reviews'" :git-info="gitInfo" :key="`${activeReviewId ?? 'empty'}:${record?.createdAt ?? ''}`" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="!!record && isAiTaskRunning('topic-review', record.id)" :review-ai-busy="!!record && (isAiTaskRunning('topic-review', record.id) || isAiTaskRunning('request-review', record.id) || isAiTaskRunning('review-title', record.id))" :ai-actions-busy="aiActionsBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-activity="activeReviewId === aiActivityReviewId ? aiActivity : []" :ai-configured="copilotIsConfigured(settings)" :review-request-busy="!!record && isAiTaskRunning('request-review', record.id)" :review-request-completed="reviewRequestCompleted" :review-request-total="reviewRequestTotal" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="() => scanProject()" @create-review="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="(full) => generateAiReview(undefined, full)" @cancel-ai-review="cancelAi" @request-review="requestReview" @cancel-request-review="cancelRequestedReview" @mark-topic="markTopic" @mark-comment="markComment" @retry-commits="loadCommits" @dismiss-message="message = ''" />
+    <ReviewsView v-else-if="view === 'reviews'" :git-info="gitInfo" :key="`${activeReviewId ?? 'empty'}:${record?.createdAt ?? ''}`" :project="project" :reviews="reviews" :record="record" :data="reviewData" :review-view="reviewView" :settings="settings" :scan-busy="scanBusy" :scan-progress="scanProgress" :ai-busy="!!record && isAiTaskRunning('topic-review', record.id)" :review-ai-busy="!!record && (isAiTaskRunning('topic-review', record.id) || isAiTaskRunning('request-review', record.id) || isAiTaskRunning('review-title', record.id))" :ai-actions-busy="aiActionsBusy" :ai-progress="displayedAiProgress" :ai-completed="aiCompleted" :ai-total="aiTotal" :ai-activity="activeReviewId === aiActivityReviewId ? aiActivity : []" :ai-configured="copilotIsConfigured(settings)" :review-request-busy="reviewRequestBusy || (!!record && isAiTaskRunning('request-review', record.id))" :review-request-completed="reviewRequestCompleted" :review-request-total="reviewRequestTotal" :commit-history="commitHistory" :commits-busy="commitsBusy" :commits-error="commitsError" :message="message" :message-error="messageError" @select-review="selectReview" @select-tab="selectReviewTab" @scan="() => scanProject()" @create-review="scanProject" @cancel-scan="cancelScan" @delete-review="deleteSelectedReview" @generate-ai-review="(full) => generateAiReview(undefined, full)" @cancel-ai-review="cancelAi" @request-review="requestReview" @cancel-request-review="cancelRequestedReview" @mark-topic="markTopic" @mark-comment="markComment" @retry-commits="loadCommits" @dismiss-message="message = ''" />
     <BranchesView v-else-if="view === 'branches'" :git-info="gitInfo" />
     <ProjectSettingsView v-else :project="project" :git-info="gitInfo" @save="saveProjectSettings" @remove="removeProject" />
     <template #toast><div v-if="!project && message" class="toast" :class="{ error: messageError }" role="status">{{ message }}<button aria-label="Dismiss message" @click="message = ''"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div></template>

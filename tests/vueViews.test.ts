@@ -6,6 +6,8 @@ import { defaultGlobalSettings } from '../src/lib/globalSettings';
 import type { Project, ReviewRecord } from '../src/lib/projectStore';
 import type { Review } from '../src/lib/reviewTypes';
 import { reviewFixPrompt } from '../src/lib/reviewFixPrompt';
+import { placeEarlierComments } from '../src/lib/reviewCommentPlacement';
+import { topicConversationRuns } from '../src/lib/topicConversation';
 
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
 try {
@@ -13,6 +15,7 @@ try {
   const { default: AppShell } = await server.ssrLoadModule('/src/components/AppShell.vue');
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
+  const { default: ReviewCommentCard } = await server.ssrLoadModule('/src/components/ReviewCommentCard.vue');
   const { default: ReviewTreeNode } = await server.ssrLoadModule('/src/components/ReviewTreeNode.vue');
   const { default: TopicReviewView } = await server.ssrLoadModule('/src/components/TopicReviewView.vue');
   const { default: AiGenerationProgress } = await server.ssrLoadModule('/src/components/AiGenerationProgress.vue');
@@ -24,6 +27,30 @@ try {
   assert.match(shellHtml, /href="https:\/\/github\.com\/yorkie\/ming"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
   assert.match(shellHtml, /Ming on GitHub/);
   assert.doesNotMatch(shellHtml, /<span>Ming on GitHub<\/span>/);
+  const commentHtml = await renderToString(createSSRApp(ReviewCommentCard, {
+    comment: { id: 'comment-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1,
+      body: 'Check `speech.end`.\n\n```ts\nconst done = true;\n```', suggestion: 'const done = true;' },
+  }));
+  assert.match(commentHtml, /<code>speech\.end<\/code>/);
+  assert.match(commentHtml, /<pre><code class="language-ts">const done = true;/);
+  assert.match(commentHtml, /diff-review-suggestion/);
+  const resolvedCommentHtml = await renderToString(createSSRApp(ReviewCommentCard, {
+    comment: { id: 'resolved-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1,
+      body: 'Resolved `speech.end` issue.\n\nMore detail.', suggestion: 'const done = true;', severity: 'low' }, resolved: true, canResolve: true,
+    contextPath: 'src/speech.ts', canNavigate: true,
+  }));
+  assert.match(resolvedCommentHtml, /diff-review-comment-collapsed/);
+  assert.match(resolvedCommentHtml, /Resolved speech\.end issue/);
+  assert.doesNotMatch(resolvedCommentHtml, /Reopen/);
+  assert.match(resolvedCommentHtml, /diff-review-context-path[^>]*title="src\/speech\.ts"/);
+  assert.doesNotMatch(resolvedCommentHtml, /diff-review-suggestion/);
+  const expandedResolvedHtml = await renderToString(createSSRApp(ReviewCommentCard, {
+    comment: { id: 'resolved-2', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1,
+      body: 'Resolved issue.', severity: 'low' }, resolved: true, canResolve: true, focused: true, createdAt: 1_700_000_000_000,
+  }));
+  assert.match(expandedResolvedHtml, /review-resolution-label[^>]*>Resolved<\/span><span class="is-low review-severity"/);
+  assert.match(expandedResolvedHtml, /<time[^>]*>[^<]+<\/time><button[^>]*class="diff-review-collapse"/);
+  assert.match(expandedResolvedHtml, /Reopen/);
   const projectSettingsHtml = await renderToString(createSSRApp(ProjectSettingsView, { project, gitInfo: null }));
   assert.match(projectSettingsHtml, /Live review updates/);
   assert.doesNotMatch(projectSettingsHtml, /Generate topics for live updates/);
@@ -136,14 +163,57 @@ try {
   assert.match(topicHtml, /code-source/);
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
+  assert.match(topicHtml, /role="tablist"[^>]*Topic content/);
+  assert.match(topicHtml, /Conversation/);
+  assert.doesNotMatch(topicHtml, /Conversation &amp; summary/);
+  assert.match(topicHtml, /Files changed/);
+  assert.match(topicHtml, /id="topic-conversation-panel"/);
+  assert.match(topicHtml, /id="topic-files-panel"/);
   const commentedRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, commentsCreatedAt: 1_700_000_000_000,
     recommendations: { 'topic-1': ['Verify all callers before merging.'] }, recommendationSeverities: { 'topic-1': ['high'] },
     comments: [{ id: 'topic-1-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1,
       body: 'Check callers before changing this value.', severity: 'high', suggestion: 'const value = 2;' }] } };
   const commentedTopicsHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: commentedRecord, data, settings: defaultGlobalSettings }));
+  assert.equal(topicConversationRuns(commentedRecord.aiReview!, 'topic-1').length, 1);
+  const pendingTimelineRecord: ReviewRecord = { ...commentedRecord, snapshotHash: 'sample', changeEvents: [
+    { id: 'first-change', startedAt: 1, updatedAt: 1, changeCount: 1, paths: ['src/main.ts'], snapshotHash: 'old', reviewedAt: 2 },
+    { id: 'pending-change', startedAt: 3, updatedAt: 4, changeCount: 2, paths: ['src/main.ts'], snapshotHash: 'sample' },
+    { id: 'unrelated-change', startedAt: 5, updatedAt: 5, changeCount: 1, paths: ['src/other.ts'], snapshotHash: 'sample', reviewedAt: 6 },
+  ] };
+  const timelineHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: pendingTimelineRecord, data, settings: defaultGlobalSettings }));
+  assert.equal((timelineHtml.match(/class="is-change topic-timeline-item"/g) ?? []).length, 2);
+  assert.match(timelineHtml, /2 updates combined/);
+  assert.match(timelineHtml, /class="topic-timeline-marker"/);
+  assert.doesNotMatch(timelineHtml, /Request Review<\/button>/, 'Only the latest pending change offers Request Review.');
+  const actionableRecord: ReviewRecord = { ...pendingTimelineRecord, changeEvents: pendingTimelineRecord.changeEvents?.slice(0, 2) };
+  const actionableHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: actionableRecord, data, settings: defaultGlobalSettings }));
+  assert.match(actionableHtml, /Request Review<\/button>/);
+  const runningTimelineHtml = await renderToString(createSSRApp(TopicReviewView, {
+    project, record: actionableRecord, data, settings: defaultGlobalSettings, requestReviewBusy: true,
+  }));
+  assert.match(runningTimelineHtml, /disabled aria-busy="true"[^>]*><i class="bi-arrow-repeat icon-spin bi"/);
+  assert.match(runningTimelineHtml, /Reviewing…<\/button>/);
+  assert.doesNotMatch(runningTimelineHtml, /Request Review<\/button>/);
+  const closingTimelineRecord: ReviewRecord = { ...actionableRecord, changeEvents: actionableRecord.changeEvents?.map(event =>
+    event.id === 'pending-change' ? { ...event, reviewedAt: Date.now() } : event) };
+  const closingTimelineHtml = await renderToString(createSSRApp(TopicReviewView, {
+    project, record: closingTimelineRecord, data, settings: defaultGlobalSettings, requestReviewBusy: true,
+  }));
+  assert.match(closingTimelineHtml, /Reviewing…<\/button>/, 'The running state remains visible until the request finishes.');
+  assert.ok(actionableHtml.indexOf('Files changed') < actionableHtml.indexOf('Ming AI reviewed at'));
+  assert.equal(topicConversationRuns({ ...commentedRecord.aiReview!, comments: [], recommendations: { 'topic-1': [] } }, 'topic-1').length, 1,
+    'A review without findings still appears in the conversation.');
+  assert.match(commentedTopicsHtml, /Ming AI reviewed at/);
+  const recentRecord: ReviewRecord = { ...commentedRecord, aiReview: { ...commentedRecord.aiReview!, commentsCreatedAt: Date.now() - 2 * 60_000 } };
+  const recentHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: recentRecord, data, settings: defaultGlobalSettings }));
+  assert.match(recentHtml, /Ming AI reviewed at <time[^>]*>2 minutes ago<\/time>/);
+  assert.match(commentedTopicsHtml, /View in files/);
+  assert.match(commentedTopicsHtml, /data-comment-id="topic-1-1"/);
   assert.match(commentedTopicsHtml, /diff-review-comment/);
   assert.match(commentedTopicsHtml, /Check callers before changing this value/);
   assert.match(commentedTopicsHtml, /Suggested change/);
+  assert.match(commentedTopicsHtml, /Mark reviewed/);
+  assert.match(commentedTopicsHtml, /Resolve/);
   assert.match(commentedTopicsHtml, /class="topic-meta"/);
   assert.match(commentedTopicsHtml, /class="topic-comment-count"[^>]*title="1 comments"/);
   assert.match(commentedTopicsHtml, /Review conclusion/);
@@ -152,14 +222,61 @@ try {
   assert.doesNotMatch(commentedTopicsHtml, /class="is-passing topic-recommendations"/);
   const previousRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, comments: [],
     previousComments: commentedRecord.aiReview!.comments, priorAssessments: {
-      'topic-1-1': { outcome: 'possibly-fixed', reason: 'The old call was removed.' },
-    }, revisions: [{ artifact: commentedRecord.aiReview!.artifact, reviewed: {}, comments: commentedRecord.aiReview!.comments, createdAt: 3 }] } };
+      'topic-1-1': { outcome: 'resolved', reason: 'The old call was removed.' },
+    }, revisions: [{ artifact: commentedRecord.aiReview!.artifact, sourceData: JSON.stringify(data), reviewed: {}, comments: commentedRecord.aiReview!.comments, createdAt: 3 }] } };
   const previousHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: previousRecord, data, settings: defaultGlobalSettings }));
-  assert.match(previousHtml, /Previous findings/);
-  assert.match(previousHtml, /Possibly fixed/);
-  assert.match(previousHtml, /Confirm resolved/);
-  assert.match(previousHtml, /Previous review versions/);
-  assert.doesNotMatch(previousHtml, /diff-review-comment/, 'Old line anchors must not be rendered on the current diff.');
+  assert.equal(topicConversationRuns(previousRecord.aiReview!, 'topic-1')[0]?.comments[0]?.id, 'topic-1-1');
+  const shiftedData: Review = { ...data, files: [{ path: 'src/other.ts', status: 'added', additions: 0, deletions: 0, hunks: [] }, data.files[0]!] };
+  assert.equal(placeEarlierComments(previousRecord.aiReview!, previousRecord.aiReview!.previousComments!, shiftedData).inline[0]?.fileIndex, 1);
+  assert.doesNotMatch(previousHtml, /Earlier comments/);
+  assert.match(previousHtml, /diff-review-comment/);
+  assert.match(previousHtml, /Check callers before changing this value/);
+  assert.match(previousHtml, /Resolved/);
+  assert.match(previousHtml, /diff-review-comment-collapsed/);
+  assert.doesNotMatch(previousHtml, /Reopen/);
+  assert.doesNotMatch(previousHtml, /Previous review versions|>Fix<|topic-comment-count/);
+  const carriedRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!, priorAssessments: {},
+    commentsCreatedAt: Date.now(), recommendations: { 'topic-1': [] } } };
+  const carriedHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: carriedRecord, data, settings: defaultGlobalSettings }));
+  assert.match(carriedHtml, /1 carried over/, 'The newest review shows unresolved findings retained from earlier rounds.');
+  const repeatRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!, commentsCreatedAt: 4,
+    comments: [{ ...commentedRecord.aiReview!.comments![0]!, id: 'topic-1-2', body: 'Check the updated caller.' }],
+    recommendations: { 'topic-1': ['Check the updated caller.'] } } };
+  const repeatRuns = topicConversationRuns(repeatRecord.aiReview!, 'topic-1');
+  assert.equal(repeatRuns.length, 2, 'Each Ming AI review response stays in the topic timeline.');
+  assert.deepEqual(repeatRuns.map(run => run.comments.map(comment => comment.id)), [['topic-1-1'], ['topic-1-2']]);
+  const repeatHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: repeatRecord, data, settings: defaultGlobalSettings }));
+  assert.equal((repeatHtml.match(/Ming AI reviewed at/g) ?? []).length, 2);
+  assert.match(repeatHtml, /years ago/);
+  assert.match(repeatHtml, /Check the updated caller/);
+  const outdatedRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!,
+    outdatedTopics: { 'topic-1': JSON.stringify(data) } } };
+  const outdatedHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: outdatedRecord, data, settings: defaultGlobalSettings }));
+  assert.match(outdatedHtml, /class="active outdated topic-list-item"|class="outdated active topic-list-item"/);
+  assert.match(outdatedHtml, /Out of date/);
+  assert.match(outdatedHtml, /file-outdated-conversations/);
+  assert.match(outdatedHtml, /Out of date/);
+  assert.doesNotMatch(outdatedHtml, /Mark reviewed/);
+  const legacyRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!,
+    artifact: { ...previousRecord.aiReview!.artifact, topics: [] } } };
+  const recoveredHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: legacyRecord, data, settings: defaultGlobalSettings }));
+  assert.match(recoveredHtml, /Update main/);
+  assert.match(recoveredHtml, /Out of date/);
+  assert.match(recoveredHtml, /diff-review-comment/);
+  const duplicateRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!,
+    artifact: { ...previousRecord.aiReview!.artifact, topics: [
+      { ...previousRecord.aiReview!.artifact.topics[0], id: 'topic-2' }, previousRecord.aiReview!.artifact.topics[0] ] },
+    outdatedTopics: { 'topic-1': JSON.stringify(data) }, sourceData: JSON.stringify(data) } };
+  const duplicateHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: duplicateRecord, data, settings: defaultGlobalSettings }));
+  assert.equal((duplicateHtml.match(/topic-list-item/g) ?? []).length, 1, 'Saved duplicate topics display as one row.');
+  assert.match(duplicateHtml, /diff-review-comment/);
+  const missingLineData: Review = { ...data, files: [{ ...data.files[0]!, hunks: [{ header: '@@ -0,0 +1 @@', lines: [{ kind: 'add', text: 'const value = 2;', oldNumber: null, newNumber: 1 }] }] }] };
+  const missingLineHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: previousRecord, data: missingLineData, settings: defaultGlobalSettings }));
+  assert.match(missingLineHtml, /file-outdated-conversations/);
+  assert.match(missingLineHtml, /Check callers before changing this value/);
+  const missingFileHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: previousRecord, data: { files: [], additions: 0, deletions: 0 }, settings: defaultGlobalSettings }));
+  assert.match(missingFileHtml, /missing-file-conversations/);
+  assert.match(missingFileHtml, /src\/main\.ts/);
   const passingRecord: ReviewRecord = { ...commentedRecord, aiReview: { ...commentedRecord.aiReview!, comments: [] } };
   const passingTopicsHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: passingRecord, data, settings: defaultGlobalSettings }));
   assert.match(passingTopicsHtml, /class="is-passing topic-recommendations"/);
@@ -185,6 +302,13 @@ try {
   }));
   assert.match(busyReviewHtml, /class="review-action-group" title="A Copilot task is running for this review. Wait for it to finish."/);
   assert.match(busyReviewHtml, /class="button-outline review-action-main" disabled/);
+  const runningReviewHtml = await renderToString(createSSRApp(ReviewsView, {
+    project, reviews: [commentedRecord], record: commentedRecord, data, reviewView: 'changes', settings: defaultGlobalSettings,
+    scanBusy: false, scanProgress: '', aiBusy: false, reviewRequestBusy: true, aiProgress: '', aiCompleted: 0, aiTotal: 0, aiConfigured: true,
+    commitHistory: null, commitsBusy: false, commitsError: '',
+  }));
+  assert.match(runningReviewHtml, /class="button-outline review-action-main" disabled/);
+  assert.match(runningReviewHtml, /Reviewing…<\/button>/);
   assert.match(commentedChangesHtml, /Request Review/);
   assert.match(commentedChangesHtml, /class="review-action-group"/);
   assert.match(commentedChangesHtml, /aria-label="More review actions" aria-expanded="false"/);
