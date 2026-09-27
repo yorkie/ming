@@ -3,6 +3,40 @@ import { localizeAiProgress } from '../src/lib/aiProgress';
 import { readDeepSeekStream, readDeepSeekToolStream } from '../src/lib/deepSeekStream';
 import { deepSeekRequestError } from '../src/lib/deepSeekError';
 import { buildAiStory, describeToolCall, describeToolResult, findingFromCall, formatWorkDuration } from '../src/lib/aiActivity';
+import { splitReviewPrompt } from '../src/lib/reviewPromptChunks';
+import { parseReviewComments } from '../src/lib/reviewResponse';
+import { runConcurrentReviews } from '../src/lib/concurrentReview';
+
+let activeReviews = 0;
+let maxActiveReviews = 0;
+const startedReviews: number[] = [];
+const finishReview = new Map<number, () => void>();
+const parallelReviews = runConcurrentReviews([0, 1, 2, 3], 3, async index => {
+  startedReviews.push(index);
+  activeReviews++;
+  maxActiveReviews = Math.max(maxActiveReviews, activeReviews);
+  await new Promise<void>(resolve => finishReview.set(index, resolve));
+  activeReviews--;
+});
+assert.deepEqual(startedReviews, [0, 1, 2]);
+finishReview.get(1)!();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(startedReviews, [0, 1, 2, 3]);
+assert.equal(maxActiveReviews, 3);
+for (const resolve of finishReview.values()) resolve();
+await parallelReviews;
+
+assert.deepEqual(parseReviewComments('{"comments":[]}'), { comments: [] });
+assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":" Check callers "}'), { comments: [], recommendation: 'Check callers' });
+assert.throws(() => parseReviewComments('{"comments":[{"body":"bad",}]}'), /double-quoted property name|Unexpected token/);
+assert.throws(() => parseReviewComments('{"status":"ok"}'), /comments array/);
+
+const reviewPrompt = 'Review against checklist\n- Check callers\nDIFF LINES (fileIndex, hunkIndex, side, lineNumber):\n\nsrc/a.ts (fileIndex=0, hunkIndex=0) @@ -1 +1 @@\nRIGHT:1 +first\nRIGHT:2 +second\nsrc/b.ts (fileIndex=1, hunkIndex=0) @@ -1 +1 @@\nRIGHT:1 +third';
+const reviewChunks = splitReviewPrompt(reviewPrompt, 85);
+assert.ok(reviewChunks.length > 1);
+assert.ok(reviewChunks.every(chunk => chunk.includes('Check callers')));
+assert.ok(reviewChunks.some(chunk => chunk.includes('src/a.ts') && chunk.includes('RIGHT:2 +second')));
+assert.ok(reviewChunks.some(chunk => chunk.includes('src/b.ts') && chunk.includes('RIGHT:1 +third')));
 
 const waiting = 'Group 3 of 3 · 4 files · waiting for DeepSeek (10s)…';
 assert.equal(localizeAiProgress(waiting, 'zh-CN'), '第 3/3 组 · 4 个文件 · 等待 DeepSeek（10 秒）…');
@@ -73,6 +107,9 @@ assert.equal(story.length, 3);
 assert.equal(story[1].kind, 'tools');
 assert.equal(story[1].tools?.length, 2);
 assert.equal(story[2].title, 'Related implementation and test');
+const reviewStory = buildAiStory([{ id: 1, at: 1, kind: 'request', title: 'Review topic 1', detail: 'Check callers' },
+  { id: 2, at: 2, kind: 'retry', title: 'Response was cut off' }], false, true);
+assert.deepEqual(reviewStory.map(entry => entry.title), ['Review topic 1', 'Response was cut off']);
 assert.equal(formatWorkDuration(330_000, false), '5m 30s');
 assert.equal(formatWorkDuration(330_000, true), '5分30秒');
 console.log('AI progress localization test passed');

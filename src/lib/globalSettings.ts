@@ -13,6 +13,7 @@ export type GlobalSettings = {
   copilotModel: 'deepseek-flash' | 'deepseek-v4-pro';
   copilotSummaryLanguage: 'en' | 'zh-CN';
   copilotReviewLanguage: 'en' | 'zh-CN';
+  copilotReviewConcurrency: number;
   copilotDeepSeekApiKey: string;
   githubPersonalAccessToken: string;
 };
@@ -27,7 +28,7 @@ export const defaultGlobalSettings: GlobalSettings = {
   syntaxHighlighting: true, showLineNumbers: true,
   showReadmePreview: true, filePreviewLimitKb: 500,
   defaultReviewTab: 'topics', fileChangeDetection: 'observer', expandDiffs: true,
-  copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '', copilotSummaryLanguage: 'en', copilotReviewLanguage: 'en',
+  copilotModel: 'deepseek-flash', copilotDeepSeekApiKey: '', copilotSummaryLanguage: 'en', copilotReviewLanguage: 'en', copilotReviewConcurrency: 4,
   githubPersonalAccessToken: '',
 };
 
@@ -55,6 +56,7 @@ export function parseGlobalSettings(value: string | null): GlobalSettings {
       copilotModel: choice(settings.copilotModel, ['deepseek-flash', 'deepseek-v4-pro'], defaultGlobalSettings.copilotModel),
       copilotSummaryLanguage: choice(settings.copilotSummaryLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotSummaryLanguage),
       copilotReviewLanguage: choice(settings.copilotReviewLanguage, ['en', 'zh-CN'], defaultGlobalSettings.copilotReviewLanguage),
+      copilotReviewConcurrency: choice(settings.copilotReviewConcurrency, [1, 2, 3, 4, 6, 8], defaultGlobalSettings.copilotReviewConcurrency),
       copilotDeepSeekApiKey: shortText(settings.copilotDeepSeekApiKey, 500),
       githubPersonalAccessToken: shortText(settings.githubPersonalAccessToken, 500),
     };

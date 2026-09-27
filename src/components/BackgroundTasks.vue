@@ -2,10 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { Project } from '../lib/projectStore';
 import { liveReviewStatuses, type LiveReviewStatus } from '../lib/liveReviews';
-import { reviewTitleStatuses } from '../lib/reviewTitles';
 import { t } from '../lib/i18n';
 
-type TaskStatus = LiveReviewStatus | { phase: 'titling'; detail?: string };
+type TaskStatus = LiveReviewStatus;
 const props = defineProps<{ projects: Project[] }>();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
@@ -13,15 +12,14 @@ const entries = computed(() => props.projects.flatMap(project => {
   const statuses: TaskStatus[] = [];
   const live = liveReviewStatuses.get(project.id);
   if (live) statuses.push(live);
-  for (const projectId of reviewTitleStatuses.values()) if (projectId === project.id) statuses.push({ phase: 'titling' });
   return statuses.length ? [{ project, statuses }] : [];
 }));
-const activeCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'scanning' || status.phase === 'metadata' || status.phase === 'titling').length, 0));
+const activeCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'scanning' || status.phase === 'metadata').length, 0));
 const errorCount = computed(() => entries.value.reduce((count, entry) => count + entry.statuses.filter(status => status.phase === 'error').length, 0));
-const icon = (phase: TaskStatus['phase']) => ({ watching: 'bi-eye', polling: 'bi-clock-history', metadata: 'bi-git', scanning: 'bi-arrow-repeat', titling: 'bi-pencil-square', permission: 'bi-lock', error: 'bi-exclamation-triangle' })[phase];
-const title = (phase: TaskStatus['phase']) => t(({ watching: 'File watcher', polling: 'Timer checks', metadata: 'Checking Git metadata', scanning: 'Scanning changes', titling: 'Generating review title', permission: 'Folder access required', error: 'Background task failed' })[phase]);
+const icon = (phase: TaskStatus['phase']) => ({ watching: 'bi-eye', polling: 'bi-clock-history', metadata: 'bi-git', scanning: 'bi-arrow-repeat', permission: 'bi-lock', error: 'bi-exclamation-triangle' })[phase];
+const title = (phase: TaskStatus['phase']) => t(({ watching: 'File watcher', polling: 'Timer checks', metadata: 'Checking Git metadata', scanning: 'Scanning changes', permission: 'Folder access required', error: 'Background task failed' })[phase]);
 const mode = (status: TaskStatus) => 'mode' in status ? status.mode : undefined;
-const description = (status: TaskStatus) => status.detail ?? t(({ watching: 'Watching for local changes', polling: 'Timer checks active', metadata: 'Reading branch and comparison refs', scanning: 'Checking local changes', titling: 'Summarizing the latest diff', permission: 'Waiting for folder permission', error: 'Background task failed' })[status.phase]);
+const description = (status: TaskStatus) => status.detail ?? t(({ watching: 'Watching for local changes', polling: 'Timer checks active', metadata: 'Reading branch and comparison refs', scanning: 'Checking local changes', permission: 'Waiting for folder permission', error: 'Background task failed' })[status.phase]);
 function outside(event: PointerEvent) { if (root.value && event.target instanceof Node && !root.value.contains(event.target)) open.value = false; }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape') open.value = false; }
 onMounted(() => { document.addEventListener('pointerdown', outside); document.addEventListener('keydown', keydown); });

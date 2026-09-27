@@ -10,7 +10,7 @@ export type AiActivity = {
 
 export type AiStoryEntry = {
   id: number;
-  kind: Exclude<AiActivityKind, 'request' | 'tool'> | 'tools';
+  kind: Exclude<AiActivityKind, 'tool'> | 'tools';
   title: string;
   detail?: string;
   tools?: AiActivity[];
@@ -25,10 +25,10 @@ export function formatWorkDuration(milliseconds: number, zh: boolean): string {
   return `${hours ? `${hours}h ` : ''}${hours || minutes ? `${minutes}m ` : ''}${seconds}s`;
 }
 
-export function buildAiStory(activity: AiActivity[], zh: boolean): AiStoryEntry[] {
+export function buildAiStory(activity: AiActivity[], zh: boolean, includeRequests = false): AiStoryEntry[] {
   const story: AiStoryEntry[] = [];
   for (const entry of activity) {
-    if (entry.kind === 'request') continue;
+    if (entry.kind === 'request' && !includeRequests) continue;
     if (entry.kind === 'tool') {
       const previous = story.at(-1);
       if (previous?.kind === 'tools') previous.tools!.push(entry);

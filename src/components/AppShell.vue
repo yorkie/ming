@@ -4,6 +4,7 @@ import { listReviews, type Project } from '../lib/projectStore';
 import type { GlobalSettingsSection } from '../lib/routes';
 import { language, t } from '../lib/i18n';
 import BackgroundTasks from './BackgroundTasks.vue';
+import AiTaskDock from './AiTaskDock.vue';
 
 type Page = 'files' | 'reviews' | 'branches' | 'settings';
 const props = defineProps<{
@@ -138,5 +139,6 @@ onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.
       </aside>
       <main class="workspace"><div class="page" :class="{ 'reviews-page': reviewLayout }"><slot /></div><slot name="toast" /></main>
     </div>
+    <AiTaskDock />
   </div>
 </template>

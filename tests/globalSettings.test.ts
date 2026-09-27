@@ -19,6 +19,9 @@ assert.deepEqual(parseGlobalSettings('{"language":"invalid","copilotSummaryLangu
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"timer"}').fileChangeDetection, 'timer');
 assert.equal(parseGlobalSettings('{"fileChangeDetection":"invalid"}').fileChangeDetection, 'observer');
 assert.equal(parseGlobalSettings('{"githubPersonalAccessToken":"github-token"}').githubPersonalAccessToken, 'github-token');
+assert.equal(defaultGlobalSettings.copilotReviewConcurrency, 4);
+assert.equal(parseGlobalSettings('{"copilotReviewConcurrency":6}').copilotReviewConcurrency, 6);
+assert.equal(parseGlobalSettings('{"copilotReviewConcurrency":99}').copilotReviewConcurrency, 4);
 assert.equal(shouldShowDemoProject(defaultGlobalSettings, 0, false), true);
 assert.equal(shouldShowDemoProject({ ...defaultGlobalSettings, showDemoProject: false }, 0, false), false);
 assert.equal(shouldShowDemoProject(defaultGlobalSettings, 1, false), false);

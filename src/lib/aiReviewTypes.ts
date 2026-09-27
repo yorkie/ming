@@ -24,6 +24,27 @@ export type TopicReview = {
   reviewed: Record<string, 'reviewed' | 'needs-work'>;
   createdAt: number;
   sourceData?: string;
+  comments?: ReviewComment[];
+  commentsCreatedAt?: number;
+  recommendations?: Record<string, string[]>;
+};
+
+export type ReviewComment = {
+  id: string;
+  topicId: string;
+  fileIndex: number;
+  hunkIndex: number;
+  side: 'LEFT' | 'RIGHT';
+  lineNumber: number;
+  body: string;
+  suggestion?: string | null;
+};
+
+export type ReviewCommentArtifact = {
+  schemaVersion: 1;
+  snapshotHash: string;
+  model: string;
+  comments: ReviewComment[];
 };
 
 export type AiRequestUsage = {

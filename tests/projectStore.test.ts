@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { strict as assert } from 'node:assert';
-import { deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveAiReviewIfCurrent, saveReviewSnapshot, saveReviewTitleIfCurrent, topicsAreStale, type Project } from '../src/lib/projectStore';
+import { clearTopicReviewResultsIfCurrent, deleteProject, deleteReview, listAiUsage, listProjects, listReviews, recordAiUsage, rememberProject, rememberReview, saveAiReviewIfCurrent, saveReviewCommentsIfCurrent, saveReviewSnapshot, saveReviewTitleIfCurrent, saveTopicReviewResultIfCurrent, topicsAreStale, type Project } from '../src/lib/projectStore';
 
 await new Promise<void>((resolve, reject) => {
   const request = indexedDB.open('ming-projects', 1);
@@ -56,6 +56,26 @@ assert.equal((await listReviews(project.id))[0].aiReview?.artifact.snapshotHash,
 assert.equal(await saveAiReviewIfCurrent(changedAgain.id, 'new-diff', { ...rescanned.aiReview!, artifact: { ...rescanned.aiReview!.artifact, snapshotHash: 'new-diff' } }), true);
 assert.equal((await listReviews(project.id))[0].aiReview?.artifact.snapshotHash, 'new-diff');
 assert.equal(topicsAreStale((await listReviews(project.id))[0]), false);
+assert.equal(await saveReviewCommentsIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash',
+  comments: [{ id: 'comment-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'Check the caller.' }] }, 4), true);
+assert.equal((await listReviews(project.id))[0].aiReview?.reviewed['topic-1'], 'reviewed');
+assert.equal((await listReviews(project.id))[0].aiReview?.comments?.[0]?.body, 'Check the caller.');
+assert.equal(await saveReviewCommentsIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'old-diff', model: 'deepseek-flash', comments: [] }, 4), false);
+const expandedTopics = { ...rescanned.aiReview!, artifact: { ...rescanned.aiReview!.artifact, snapshotHash: 'new-diff', topics: [
+  ...rescanned.aiReview!.artifact.topics, { id: 'topic-2', title: 'Second', summary: '', checks: [], unitIds: ['f0'] }] } };
+assert.equal(await saveAiReviewIfCurrent(changedAgain.id, 'new-diff', expandedTopics), true);
+assert.equal((await clearTopicReviewResultsIfCurrent(changedAgain.id, 4))?.comments?.length, 0);
+const [firstResult, secondResult] = await Promise.all([
+  saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash',
+    comments: [{ id: 'topic-1-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'First issue' }] }, 4, 'topic-1', ['Check the caller']),
+  saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash',
+    comments: [{ id: 'topic-2-1', topicId: 'topic-2', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'Second issue' }] }, 4, 'topic-2', ['Check the second path']),
+]);
+assert.ok(firstResult && secondResult);
+const incremental = (await listReviews(project.id))[0].aiReview!;
+assert.deepEqual(incremental.comments?.map(comment => comment.topicId).sort(), ['topic-1', 'topic-2']);
+assert.deepEqual(incremental.recommendations?.['topic-2'], ['Check the second path']);
+assert.equal(await saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'old-diff', model: 'deepseek-flash', comments: [] }, 4, 'topic-1', []), null);
 await rememberReview(changedAgain);
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);
 await rememberReview({ id: 'legacy-duplicate', projectId: project.id, createdAt: 2, branch: 'main', baseRef: 'HEAD', data: '{"files":[]}' });

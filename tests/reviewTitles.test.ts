@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { defaultGlobalSettings, saveGlobalSettings } from '../src/lib/globalSettings';
 import { listReviews, saveReviewSnapshot, type Project } from '../src/lib/projectStore';
 import { generateReviewTitleInBackground } from '../src/lib/reviewTitles';
+import { aiTaskId, aiTasks } from '../src/lib/aiTasks';
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
@@ -28,6 +29,7 @@ const review = await saveReviewSnapshot({ id: 'review-title', projectId: project
   branch: 'main', baseRef: 'HEAD', data: '{"files":[{"path":"a.ts"}]}', snapshotHash: 'first' });
 const changed = new Promise<void>(resolve => window.addEventListener('ming:reviews-changed', () => resolve(), { once: true }));
 generateReviewTitleInBackground(project, review);
+assert.equal(aiTasks.get(aiTaskId('review-title', review.id))?.status, 'running');
 const worker = FakeWorker.instances[0]!;
 assert.equal(worker.request?.taskKind, 'review-title');
 assert.equal(worker.request?.summaryLanguage, defaultGlobalSettings.copilotSummaryLanguage);
@@ -35,6 +37,7 @@ assert.equal((await listReviews(project.id))[0].title, undefined);
 worker.onmessage?.({ data: { type: 'done', artifact: { schemaVersion: 1, snapshotHash: 'first', model: 'deepseek-flash', title: 'Summarize changes' } } } as MessageEvent);
 await changed;
 assert.equal((await listReviews(project.id))[0].title, 'Summarize changes');
+assert.equal(aiTasks.get(aiTaskId('review-title', review.id))?.status, 'done');
 
 const updated = await saveReviewSnapshot({ ...review, createdAt: 2, data: '{"files":[{"path":"b.ts"}]}', snapshotHash: 'second' });
 assert.equal(updated.title, undefined);

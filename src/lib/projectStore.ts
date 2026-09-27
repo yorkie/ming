@@ -1,4 +1,4 @@
-import type { ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
+import type { ReviewCommentArtifact, ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
 export type ProjectSettings = { baseRef: string; liveReview?: boolean; githubRepository?: string };
 export type Project = {
   id: string;
@@ -31,7 +31,7 @@ export type AiUsageRecord = {
   projectName: string;
   reviewId: string;
   createdAt: number;
-  task: 'topic-review' | 'review-title';
+  task: 'topic-review' | 'review-title' | 'request-review';
   provider: 'deepseek';
   model: string;
   group: number;
@@ -139,6 +139,69 @@ export async function saveAiReviewIfCurrent(id: string, snapshotHash: string | u
         store.put({ ...current, snapshotHash: snapshotHash ?? aiReview.artifact.snapshotHash, aiReview });
         saved = true;
       }
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+export async function saveReviewCommentsIfCurrent(id: string, artifact: ReviewCommentArtifact, topicsCreatedAt: number): Promise<boolean> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved = false;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (current?.aiReview && !topicsAreStale(current) && current.aiReview.createdAt === topicsCreatedAt
+        && current.aiReview.artifact.snapshotHash === artifact.snapshotHash) {
+        store.put({ ...current, aiReview: { ...current.aiReview, comments: artifact.comments, commentsCreatedAt: Date.now() } });
+        saved = true;
+      }
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+export async function saveTopicReviewResultIfCurrent(id: string, artifact: ReviewCommentArtifact, topicsCreatedAt: number,
+  topicId: string, recommendations: string[]): Promise<TopicReview | null> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved: TopicReview | null = null;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (!current?.aiReview || topicsAreStale(current) || current.aiReview.createdAt !== topicsCreatedAt ||
+        current.aiReview.artifact.snapshotHash !== artifact.snapshotHash ||
+        !current.aiReview.artifact.topics.some(topic => topic.id === topicId) ||
+        artifact.comments.some(comment => comment.topicId !== topicId)) return;
+      saved = { ...current.aiReview,
+        comments: [...(current.aiReview.comments ?? []).filter(comment => comment.topicId !== topicId), ...artifact.comments],
+        recommendations: { ...current.aiReview.recommendations, [topicId]: recommendations },
+        commentsCreatedAt: Date.now() };
+      store.put({ ...current, aiReview: saved });
+    };
+    tx.oncomplete = () => { db.close(); resolve(saved); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreatedAt: number): Promise<TopicReview | null> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    const store = tx.objectStore('reviews');
+    let saved: TopicReview | null = null;
+    const request = store.get(id);
+    request.onsuccess = () => {
+      const current = request.result as ReviewRecord | undefined;
+      if (!current?.aiReview || topicsAreStale(current) || current.aiReview.createdAt !== topicsCreatedAt) return;
+      saved = { ...current.aiReview, comments: [], recommendations: {}, commentsCreatedAt: undefined };
+      store.put({ ...current, aiReview: saved });
     };
     tx.oncomplete = () => { db.close(); resolve(saved); };
     tx.onabort = () => { db.close(); reject(tx.error); };
