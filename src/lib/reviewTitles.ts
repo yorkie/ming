@@ -17,7 +17,7 @@ export function generateReviewTitleInBackground(project: Project, review: Review
   const worker = new Worker(new URL('../workers/aiTaskWorker.ts', import.meta.url), { type: 'module' });
   active.set(review.id, { snapshotHash: review.snapshotHash, worker });
   const taskId = beginAiTask({ kind: 'review-title', projectId: project.id, projectName: project.name,
-    reviewId: review.id, detail: language.value === 'zh-CN' ? '正在生成评审标题…' : 'Generating a review title…' });
+    reviewId: review.id, detail: language.value === 'zh-CN' ? '正在生成评审标题…' : 'Generating a review title…' }, () => { void finish(); });
   const usageWrites: Promise<void>[] = [];
   const finish = async (artifact?: ReviewTitleArtifact, failure?: string) => {
     if (active.get(review.id)?.worker !== worker) return;

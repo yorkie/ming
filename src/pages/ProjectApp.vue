@@ -10,7 +10,7 @@ import { loadGlobalSettings } from '../lib/globalSettings';
 import AppShell from '../components/AppShell.vue';
 import { addLocalProject } from '../lib/addProject';
 import type { Review } from '../lib/reviewTypes';
-import type { AiRequestUsage, ReviewCommentArtifact, TopicArtifact } from '../lib/aiReviewTypes';
+import type { AiRequestUsage, ReviewCommentArtifact, ReviewSeverity, TopicArtifact } from '../lib/aiReviewTypes';
 import { language, t } from '../lib/i18n';
 import { localizeAiProgress } from '../lib/aiProgress';
 import type { AiActivity } from '../lib/aiActivity';
@@ -321,8 +321,7 @@ function cancelRequestedReview() { cancelReviewRequest?.(); }
 async function requestReview() {
   let selected = record.value;
   if (!selected || aiActionsBusy.value || scanBusy.value) return;
-  if (!selected.aiReview) { note('Generate AI topics before requesting review.', true); return; }
-  if (topicsAreStale(selected)) {
+  if (!selected.aiReview || topicsAreStale(selected)) {
     const reviewId = selected.id;
     if (!await generateAiReview(reviewId)) return;
     selected = reviews.value.find(item => item.id === reviewId) ?? null;
@@ -350,7 +349,7 @@ async function requestReview() {
   try {
     const commentCount = await new Promise<number>((resolve, reject) => {
       cancelReviewRequest = () => { worker.terminate(); cancelReviewRequest = null; reject(new DOMException('Review canceled', 'AbortError')); };
-      worker.onmessage = (event: MessageEvent<{ type: 'progress'; completed: number; total: number; message: string } | { type: 'activity'; event: AiActivity } | { type: 'usage'; usage: AiRequestUsage } | { type: 'topic-complete'; topicId: string; artifact: ReviewCommentArtifact; recommendations: string[] } | { type: 'done'; commentCount: number } | { type: 'error'; message: string }>) => {
+      worker.onmessage = (event: MessageEvent<{ type: 'progress'; completed: number; total: number; message: string } | { type: 'activity'; event: AiActivity } | { type: 'usage'; usage: AiRequestUsage } | { type: 'topic-complete'; topicId: string; artifact: ReviewCommentArtifact; recommendations: string[]; recommendationSeverities: (ReviewSeverity | null)[] } | { type: 'done'; commentCount: number } | { type: 'error'; message: string }>) => {
         if (event.data.type === 'progress') { reviewRequestCompleted.value = event.data.completed; reviewRequestTotal.value = event.data.total;
           updateAiTask(taskId, { completed: event.data.completed, total: event.data.total,
             detail: event.data.message }); }
@@ -362,9 +361,9 @@ async function requestReview() {
           projectId: selected.projectId, projectName: project.value?.name ?? 'Unknown project', reviewId: selected.id,
           createdAt: Date.now(), task: 'request-review', provider: 'deepseek' }).catch(() => {}));
         else if (event.data.type === 'topic-complete') {
-          const { artifact, topicId, recommendations } = event.data;
+          const { artifact, topicId, recommendations, recommendationSeverities } = event.data;
           topicWrites = topicWrites.then(async () => {
-            const saved = await saveTopicReviewResultIfCurrent(selected.id, artifact, selected.aiReview!.createdAt, topicId, recommendations);
+            const saved = await saveTopicReviewResultIfCurrent(selected.id, artifact, selected.aiReview!.createdAt, topicId, recommendations, recommendationSeverities);
             if (!saved) throw new Error(t('Topics changed during review. Request review again.'));
             reviews.value = reviews.value.map(item => item.id === selected.id ? { ...item, aiReview: saved } : item);
             window.dispatchEvent(new CustomEvent('ming:reviews-changed', { detail: { projectId: selected.projectId } }));

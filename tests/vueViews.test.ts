@@ -5,10 +5,12 @@ import { createServer } from 'vite';
 import { defaultGlobalSettings } from '../src/lib/globalSettings';
 import type { Project, ReviewRecord } from '../src/lib/projectStore';
 import type { Review } from '../src/lib/reviewTypes';
+import { reviewFixPrompt } from '../src/lib/reviewFixPrompt';
 
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
 try {
   const { setLanguage } = await server.ssrLoadModule('/src/lib/i18n.ts');
+  const { default: AppShell } = await server.ssrLoadModule('/src/components/AppShell.vue');
   const { default: FilesView } = await server.ssrLoadModule('/src/components/FilesView.vue');
   const { default: ReviewsView } = await server.ssrLoadModule('/src/components/ReviewsView.vue');
   const { default: ReviewTreeNode } = await server.ssrLoadModule('/src/components/ReviewTreeNode.vue');
@@ -18,6 +20,10 @@ try {
   const { beginAiTask, updateAiTask, finishAiTask, dismissAiTask } = await server.ssrLoadModule('/src/lib/aiTasks.ts');
   const { default: ProjectSettingsView } = await server.ssrLoadModule('/src/components/ProjectSettingsView.vue');
   const project: Project = { id: 'project-1', name: 'sample', directory: {} as FileSystemDirectoryHandle, addedAt: 1, settings: { baseRef: 'HEAD' } };
+  const shellHtml = await renderToString(createSSRApp(AppShell, { projects: [project], activeProject: project, mode: 'project', page: 'reviews' }));
+  assert.match(shellHtml, /href="https:\/\/github\.com\/yorkie\/ming"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
+  assert.match(shellHtml, /Ming on GitHub/);
+  assert.doesNotMatch(shellHtml, /<span>Ming on GitHub<\/span>/);
   const projectSettingsHtml = await renderToString(createSSRApp(ProjectSettingsView, { project, gitInfo: null }));
   assert.match(projectSettingsHtml, /Live review updates/);
   assert.doesNotMatch(projectSettingsHtml, /Generate topics for live updates/);
@@ -124,16 +130,31 @@ try {
   assert.match(topicHtml, /value/);
   assert.match(topicHtml, /Mark reviewed/);
   const commentedRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, commentsCreatedAt: 1_700_000_000_000,
-    recommendations: { 'topic-1': ['Verify all callers before merging.'] },
+    recommendations: { 'topic-1': ['Verify all callers before merging.'] }, recommendationSeverities: { 'topic-1': ['high'] },
     comments: [{ id: 'topic-1-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1,
-      body: 'Check callers before changing this value.', suggestion: 'const value = 2;' }] } };
+      body: 'Check callers before changing this value.', severity: 'high', suggestion: 'const value = 2;' }] } };
   const commentedTopicsHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: commentedRecord, data, settings: defaultGlobalSettings }));
   assert.match(commentedTopicsHtml, /diff-review-comment/);
   assert.match(commentedTopicsHtml, /Check callers before changing this value/);
   assert.match(commentedTopicsHtml, /Suggested change/);
   assert.match(commentedTopicsHtml, /class="topic-meta"/);
   assert.match(commentedTopicsHtml, /class="topic-comment-count"[^>]*title="1 comments"/);
-  assert.match(commentedTopicsHtml, /Review recommendation/);
+  assert.match(commentedTopicsHtml, /Review conclusion/);
+  assert.match(commentedTopicsHtml, /class="is-high review-severity"/);
+  assert.match(commentedTopicsHtml, /Copy a prompt for your coding agent/);
+  assert.doesNotMatch(commentedTopicsHtml, /class="is-passing topic-recommendations"/);
+  const passingRecord: ReviewRecord = { ...commentedRecord, aiReview: { ...commentedRecord.aiReview!, comments: [] } };
+  const passingTopicsHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: passingRecord, data, settings: defaultGlobalSettings }));
+  assert.match(passingTopicsHtml, /class="is-passing topic-recommendations"/);
+  assert.match(passingTopicsHtml, /class="topic-review-passed">Passed/);
+  assert.doesNotMatch(passingTopicsHtml, /class="topic-comment-count"/);
+  assert.doesNotMatch(passingTopicsHtml, /Copy a prompt for your coding agent/);
+  const fixPrompt = reviewFixPrompt(commentedRecord.aiReview!.artifact.topics[0]!,
+    commentedRecord.aiReview!.recommendations!['topic-1']!, commentedRecord.aiReview!.comments!, data, false);
+  assert.match(fixPrompt, /Topic: Update main/);
+  assert.match(fixPrompt, /src\/main\.ts:1 \(new line\)/);
+  assert.match(fixPrompt, /Check callers before changing this value/);
+  assert.match(fixPrompt, /Verify all callers before merging/);
   assert.match(commentedTopicsHtml, /Verify all callers before merging/);
   const commentedChangesHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [commentedRecord], record: commentedRecord, data, reviewView: 'changes', settings: defaultGlobalSettings,

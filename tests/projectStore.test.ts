@@ -67,7 +67,7 @@ assert.equal(await saveAiReviewIfCurrent(changedAgain.id, 'new-diff', expandedTo
 assert.equal((await clearTopicReviewResultsIfCurrent(changedAgain.id, 4))?.comments?.length, 0);
 const [firstResult, secondResult] = await Promise.all([
   saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash',
-    comments: [{ id: 'topic-1-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'First issue' }] }, 4, 'topic-1', ['Check the caller']),
+    comments: [{ id: 'topic-1-1', topicId: 'topic-1', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'First issue', severity: 'high' }] }, 4, 'topic-1', ['Check the caller'], ['high']),
   saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'new-diff', model: 'deepseek-flash',
     comments: [{ id: 'topic-2-1', topicId: 'topic-2', fileIndex: 0, hunkIndex: 0, side: 'RIGHT', lineNumber: 1, body: 'Second issue' }] }, 4, 'topic-2', ['Check the second path']),
 ]);
@@ -75,6 +75,8 @@ assert.ok(firstResult && secondResult);
 const incremental = (await listReviews(project.id))[0].aiReview!;
 assert.deepEqual(incremental.comments?.map(comment => comment.topicId).sort(), ['topic-1', 'topic-2']);
 assert.deepEqual(incremental.recommendations?.['topic-2'], ['Check the second path']);
+assert.deepEqual(incremental.recommendationSeverities?.['topic-1'], ['high']);
+assert.equal(incremental.comments?.find(comment => comment.topicId === 'topic-1')?.severity, 'high');
 assert.equal(await saveTopicReviewResultIfCurrent(changedAgain.id, { schemaVersion: 1, snapshotHash: 'old-diff', model: 'deepseek-flash', comments: [] }, 4, 'topic-1', []), null);
 await rememberReview(changedAgain);
 assert.deepEqual((await listReviews(project.id)).map(review => review.id), ['review-1']);

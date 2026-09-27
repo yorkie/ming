@@ -135,7 +135,7 @@ onUnmounted(() => { summaryRequest++; if (clock) clearInterval(clock); document.
           <button v-if="!hideProjectSettings" type="button" :class="{ active: page === 'settings' }" @click="emit('selectPage', 'settings')"><i class="bi bi-gear" aria-hidden="true"></i><span class="project-nav-text">{{ t('Settings') }}</span></button>
         </nav></div>
         <div v-else class="rail-section"><div class="rail-heading"><span>{{ t('Workspace') }}</span></div><p class="rail-empty">{{ t('Select a project above.') }}</p></div>
-        <div class="rail-global-settings"><button type="button" :class="{ active: mode === 'settings' }" :aria-label="t('MING Console')" :title="t('MING Console')" @click="emit('globalSettings')"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>{{ t('MING Console') }}</span></button></div>
+        <div class="rail-global-settings"><a class="rail-source-link" href="https://github.com/yorkie/ming" target="_blank" rel="noopener noreferrer" aria-label="Ming on GitHub" title="Ming on GitHub"><i class="bi bi-github" aria-hidden="true"></i></a><button type="button" :class="{ active: mode === 'settings' }" :aria-label="t('MING Console')" :title="t('MING Console')" @click="emit('globalSettings')"><i class="bi bi-sliders2" aria-hidden="true"></i><span>{{ t('MING Console') }}</span></button></div>
       </aside>
       <main class="workspace"><div class="page" :class="{ 'reviews-page': reviewLayout }"><slot /></div><slot name="toast" /></main>
     </div>

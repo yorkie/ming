@@ -1,4 +1,4 @@
-import type { ReviewCommentArtifact, ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
+import type { ReviewCommentArtifact, ReviewSeverity, ReviewTitleArtifact, TopicReview } from './aiReviewTypes';
 export type ProjectSettings = { baseRef: string; liveReview?: boolean; githubRepository?: string };
 export type Project = {
   id: string;
@@ -166,7 +166,7 @@ export async function saveReviewCommentsIfCurrent(id: string, artifact: ReviewCo
   });
 }
 export async function saveTopicReviewResultIfCurrent(id: string, artifact: ReviewCommentArtifact, topicsCreatedAt: number,
-  topicId: string, recommendations: string[]): Promise<TopicReview | null> {
+  topicId: string, recommendations: string[], recommendationSeverities: (ReviewSeverity | null)[] = []): Promise<TopicReview | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('reviews', 'readwrite');
@@ -182,6 +182,7 @@ export async function saveTopicReviewResultIfCurrent(id: string, artifact: Revie
       saved = { ...current.aiReview,
         comments: [...(current.aiReview.comments ?? []).filter(comment => comment.topicId !== topicId), ...artifact.comments],
         recommendations: { ...current.aiReview.recommendations, [topicId]: recommendations },
+        recommendationSeverities: { ...current.aiReview.recommendationSeverities, [topicId]: recommendationSeverities },
         commentsCreatedAt: Date.now() };
       store.put({ ...current, aiReview: saved });
     };
@@ -200,7 +201,7 @@ export async function clearTopicReviewResultsIfCurrent(id: string, topicsCreated
     request.onsuccess = () => {
       const current = request.result as ReviewRecord | undefined;
       if (!current?.aiReview || topicsAreStale(current) || current.aiReview.createdAt !== topicsCreatedAt) return;
-      saved = { ...current.aiReview, comments: [], recommendations: {}, commentsCreatedAt: undefined };
+      saved = { ...current.aiReview, comments: [], recommendations: {}, recommendationSeverities: {}, commentsCreatedAt: undefined };
       store.put({ ...current, aiReview: saved });
     };
     tx.oncomplete = () => { db.close(); resolve(saved); };

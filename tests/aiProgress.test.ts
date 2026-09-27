@@ -28,6 +28,8 @@ await parallelReviews;
 
 assert.deepEqual(parseReviewComments('{"comments":[]}'), { comments: [] });
 assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":" Check callers "}'), { comments: [], recommendation: 'Check callers' });
+assert.deepEqual(parseReviewComments('{"comments":[],"recommendation":"Fix callers","recommendationSeverity":"high"}'),
+  { comments: [], recommendation: 'Fix callers', recommendationSeverity: 'high' });
 assert.throws(() => parseReviewComments('{"comments":[{"body":"bad",}]}'), /double-quoted property name|Unexpected token/);
 assert.throws(() => parseReviewComments('{"status":"ok"}'), /comments array/);
 
@@ -37,6 +39,10 @@ assert.ok(reviewChunks.length > 1);
 assert.ok(reviewChunks.every(chunk => chunk.includes('Check callers')));
 assert.ok(reviewChunks.some(chunk => chunk.includes('src/a.ts') && chunk.includes('RIGHT:2 +second')));
 assert.ok(reviewChunks.some(chunk => chunk.includes('src/b.ts') && chunk.includes('RIGHT:1 +third')));
+const forcedReviewChunks = splitReviewPrompt(reviewPrompt, 12_000, true);
+assert.ok(forcedReviewChunks.length > 1);
+assert.ok(forcedReviewChunks.every(chunk => chunk.includes('Check callers')));
+assert.ok(forcedReviewChunks.every(chunk => /RIGHT:\d+ \+/.test(chunk)));
 
 const waiting = 'Group 3 of 3 · 4 files · waiting for DeepSeek (10s)…';
 assert.equal(localizeAiProgress(waiting, 'zh-CN'), '第 3/3 组 · 4 个文件 · 等待 DeepSeek（10 秒）…');

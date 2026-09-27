@@ -27,7 +27,10 @@ export type TopicReview = {
   comments?: ReviewComment[];
   commentsCreatedAt?: number;
   recommendations?: Record<string, string[]>;
+  recommendationSeverities?: Record<string, (ReviewSeverity | null)[]>;
 };
+
+export type ReviewSeverity = 'high' | 'medium' | 'low';
 
 export type ReviewComment = {
   id: string;
@@ -37,6 +40,7 @@ export type ReviewComment = {
   side: 'LEFT' | 'RIGHT';
   lineNumber: number;
   body: string;
+  severity?: ReviewSeverity;
   suggestion?: string | null;
 };
 

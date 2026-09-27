@@ -1,7 +1,7 @@
 import init, { advance_task, start_task_with_languages } from '../wasm/ming_core.js';
 import { readDeepSeekStream } from '../lib/deepSeekStream';
 import { deepSeekRequestError } from '../lib/deepSeekError';
-import type { AiRequestUsage, ReviewCommentArtifact, TopicArtifact } from '../lib/aiReviewTypes';
+import type { AiRequestUsage, ReviewCommentArtifact, ReviewSeverity, TopicArtifact } from '../lib/aiReviewTypes';
 import type { Review } from '../lib/reviewTypes';
 import type { AiActivityKind } from '../lib/aiActivity';
 import { splitReviewPrompt } from '../lib/reviewPromptChunks';
@@ -45,11 +45,11 @@ async function ask(command: Command, apiKey: string, group: number, total: numbe
         method: 'POST', signal: controller.signal,
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: command.model, stream: true, stream_options: { include_usage: true },
-          response_format: { type: 'json_object' }, max_tokens: attempt > 1 ? Math.max(command.maxOutputTokens, 8_000) : command.maxOutputTokens,
+          response_format: { type: 'json_object' }, max_tokens: attempt > 2 ? Math.max(command.maxOutputTokens, 16_000) : attempt > 1 ? Math.max(command.maxOutputTokens, 8_000) : command.maxOutputTokens,
           messages: [{ role: 'system', content: 'You are a careful code reviewer. Return one valid JSON object only. Its comments property must be an array. Keep each finding concise.' },
             { role: 'user', content: attempt > 1 ? `${command.prompt}\n\n${retryReason === 'json'
               ? 'Your previous response was invalid JSON. Return only a complete JSON object with a comments array. Escape quotes and newlines inside strings. Omit optional suggestions if needed.'
-              : 'Your previous response was cut off. Return at most 8 highest priority findings, with short bodies and no optional suggestion unless necessary.'} Keep the entire JSON response compact.` : command.prompt }] }),
+              : attempt > 2 ? 'The response was cut off again. Return at most 2 confirmed findings. Each body must be one short sentence. Omit all suggestions and keep the recommendation to one sentence.' : 'Your previous response was cut off. Return at most 8 highest priority findings, with short bodies and no optional suggestion unless necessary.'} Keep the entire JSON response compact.` : command.prompt }] }),
       });
       httpStatus = response.status;
       if ((response.status === 429 || response.status >= 500) && attempt < command.maxAttempts) { report('error'); activity('retry', zh ? '服务暂时不可用，正在重试。' : 'The service is temporarily unavailable; retrying.', `HTTP ${response.status}`); await new Promise(resolve => setTimeout(resolve, 500 * attempt)); continue; }
@@ -84,17 +84,18 @@ async function ask(command: Command, apiKey: string, group: number, total: numbe
   }
   throw new Error('DeepSeek did not finish the review.');
 }
-async function reviewInChunks(command: Command, apiKey: string, group: number, total: number, topic: string, checks: string[], zh: boolean, depth = 0): Promise<{ comments: unknown[]; recommendations: string[] }> {
+async function reviewInChunks(command: Command, apiKey: string, group: number, total: number, topic: string, checks: string[], zh: boolean, depth = 0): Promise<{ comments: unknown[]; recommendations: string[]; recommendationSeverities: (ReviewSeverity | null)[] }> {
   const largeInput = depth === 0 && command.prompt.length > 24_000;
   try {
     if (largeInput) throw new TruncatedReviewError('The topic diff is large.');
     const response = await ask(command, apiKey, group, total, topic, checks, zh);
     const parsed = parseReviewComments(response);
-    return { comments: parsed.comments, recommendations: parsed.recommendation ? [parsed.recommendation] : [] };
+    return { comments: parsed.comments, recommendations: parsed.recommendation ? [parsed.recommendation] : [],
+      recommendationSeverities: parsed.recommendation ? [parsed.recommendationSeverity ?? null] : [] };
   } catch (cause) {
     if (!(cause instanceof TruncatedReviewError || cause instanceof MalformedReviewError)) throw cause;
     if (depth >= 6) throw new Error(`DeepSeek could not return valid review JSON for the smallest section of ${topic}; no comments were saved for this task.`);
-    const chunks = splitReviewPrompt(command.prompt, depth === 0 ? 12_000 : Math.max(1_500, Math.floor(command.prompt.length / 2)));
+    const chunks = splitReviewPrompt(command.prompt, depth === 0 ? 12_000 : Math.max(1_500, Math.floor(command.prompt.length / 2)), true);
     if (chunks.length < 2) throw new Error(`DeepSeek could not review the smallest diff section for ${topic}: ${cause.message}`);
     activity('retry', largeInput
       ? zh ? `「${topic}」的差异较大，分 ${chunks.length} 段评审。` : `The diff for ${topic} is large; reviewing ${chunks.length} smaller sections.`
@@ -103,15 +104,17 @@ async function reviewInChunks(command: Command, apiKey: string, group: number, t
         : zh ? `「${topic}」的回复仍被截断，改为分 ${chunks.length} 段评审。` : `The response for ${topic} is still truncated; reviewing ${chunks.length} smaller sections.`);
     const comments: unknown[] = [];
     const recommendations: string[] = [];
+    const recommendationSeverities: (ReviewSeverity | null)[] = [];
     for (const [index, prompt] of chunks.entries()) {
       activity('request', zh ? `评审「${topic}」的第 ${index + 1}/${chunks.length} 段差异。` : `Reviewing section ${index + 1}/${chunks.length} of ${topic}.`);
       progress({ completed: group - 1, total }, zh ? `正在评审「${topic}」的第 ${index + 1}/${chunks.length} 段…` : `Reviewing section ${index + 1}/${chunks.length} of ${topic}…`);
       const result = await reviewInChunks({ ...command, prompt }, apiKey, group, total, topic, checks, zh, depth + 1);
       comments.push(...result.comments);
       recommendations.push(...result.recommendations);
+      recommendationSeverities.push(...result.recommendationSeverities);
       activity('validation', zh ? `第 ${index + 1}/${chunks.length} 段已完成，提出 ${result.comments.length} 条候选意见。` : `Section ${index + 1}/${chunks.length} complete with ${result.comments.length} proposed findings.`);
     }
-    return { comments: comments.slice(0, 20), recommendations: [...new Set(recommendations)] };
+    return { comments: comments.slice(0, 20), recommendations, recommendationSeverities };
   }
 }
 self.onmessage = async (event: MessageEvent<Request>) => {
@@ -141,7 +144,8 @@ self.onmessage = async (event: MessageEvent<Request>) => {
             : [result.artifact.comments.length
               ? zh ? `请先核查本主题的 ${result.artifact.comments.length} 条行级评论，再决定是否标记为已评审。` : `Check the ${result.artifact.comments.length} inline comments before marking this topic reviewed.`
               : zh ? '本次未发现可定位到差异行的问题；仍请人工核对检查清单。' : 'No issue anchored to a diff line was found; verify the checklist manually.'];
-          self.postMessage({ type: 'topic-complete', topicId: topic.id, artifact: result.artifact, recommendations });
+          const recommendationSeverities = response.recommendations.length ? response.recommendationSeverities : [null];
+          self.postMessage({ type: 'topic-complete', topicId: topic.id, artifact: result.artifact, recommendations, recommendationSeverities });
           activity('done', zh ? `已完成「${topic.title}」的评审，确认 ${result.artifact.comments.length} 条评论。` : `Finished ${topic.title} with ${result.artifact.comments.length} validated comments.`);
           progress({ completed, total }, zh ? `已完成 ${completed}/${total} 个主题。` : `Reviewed ${completed}/${total} topics.`);
     });
