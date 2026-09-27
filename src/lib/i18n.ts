@@ -85,7 +85,7 @@ const zh: Record<string, string> = {
   'Concurrent topic reviews': '并发评审主题数', 'Maximum topics reviewed at the same time during Request Review': 'Request Review 同时评审的主题上限',
   'A Copilot task is running for this review. Wait for it to finish.': '当前评审有 Copilot 任务正在运行，请等待任务完成。',
   'comments': '条评论', 'Review recommendation': '本次评审建议', 'Review conclusion': '本次评审结论',
-  'Fix': '修复', 'Copied': '已复制', 'Copy a prompt for your coding agent': '复制给 Coding agent 的修复提示词', 'Could not copy to clipboard': '无法复制到剪切板',
+  'Fix': '修复', 'Copy': '复制', 'Copied': '已复制', 'Copy current comments': '复制当前评论', 'Could not copy to clipboard': '无法复制到剪切板',
   'Passed': '通过',
   'High': '严重', 'Medium': '建议修复', 'Low': '可选',
   'Topics will appear here when generation finishes.': '主题生成完成后会显示在这里。',

@@ -568,6 +568,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .topic-stale-action:hover { background: #fff3ae; border-color: #b08818; }
 .topic-stale-action > span:nth-child(2) { flex: 1; min-width: 0; }
 .topic-stale-action > span:nth-child(2) > span { display: block; margin-top: 4px; line-height: 1.5; }
+.topic-stale-empty { align-items: center; flex-wrap: wrap; }
+.topic-stale-empty > span { flex: 1 1 20rem; min-width: min(100%, 12rem); }
+.topic-stale-empty > button { flex: none; }
 .topic-stale-link { align-self: center; white-space: nowrap; font-weight: 600; }
 .topic-stale-link i { margin-left: 4px; }
 .topic-generation-progress { display: block; }

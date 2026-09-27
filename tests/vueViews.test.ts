@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { defaultGlobalSettings } from '../src/lib/globalSettings';
 import type { Project, ReviewRecord } from '../src/lib/projectStore';
 import type { Review } from '../src/lib/reviewTypes';
-import { reviewFixPrompt } from '../src/lib/reviewFixPrompt';
+import { reviewCommentsText } from '../src/lib/reviewCommentsText';
 import { placeEarlierComments } from '../src/lib/reviewCommentPlacement';
 import { topicConversationRuns } from '../src/lib/topicConversation';
 
@@ -218,7 +218,7 @@ try {
   assert.match(commentedTopicsHtml, /class="topic-comment-count"[^>]*title="1 comments"/);
   assert.match(commentedTopicsHtml, /Review conclusion/);
   assert.match(commentedTopicsHtml, /class="is-high review-severity"/);
-  assert.match(commentedTopicsHtml, /Copy a prompt for your coding agent/);
+  assert.match(commentedTopicsHtml, /Copy current comments/);
   assert.doesNotMatch(commentedTopicsHtml, /class="is-passing topic-recommendations"/);
   const previousRecord: ReviewRecord = { ...topicRecord, aiReview: { ...topicRecord.aiReview!, comments: [],
     previousComments: commentedRecord.aiReview!.comments, priorAssessments: {
@@ -239,6 +239,8 @@ try {
     commentsCreatedAt: Date.now(), recommendations: { 'topic-1': [] } } };
   const carriedHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: carriedRecord, data, settings: defaultGlobalSettings }));
   assert.match(carriedHtml, /1 carried over/, 'The newest review shows unresolved findings retained from earlier rounds.');
+  assert.doesNotMatch(carriedHtml, /class="topic-comment-count"/, 'Earlier open comments do not appear in the current topic count.');
+  assert.doesNotMatch(carriedHtml, /Copy current comments/, 'Earlier comments alone must not offer a current comment copy action.');
   const repeatRecord: ReviewRecord = { ...previousRecord, aiReview: { ...previousRecord.aiReview!, commentsCreatedAt: 4,
     comments: [{ ...commentedRecord.aiReview!.comments![0]!, id: 'topic-1-2', body: 'Check the updated caller.' }],
     recommendations: { 'topic-1': ['Check the updated caller.'] } } };
@@ -246,6 +248,11 @@ try {
   assert.equal(repeatRuns.length, 2, 'Each Ming AI review response stays in the topic timeline.');
   assert.deepEqual(repeatRuns.map(run => run.comments.map(comment => comment.id)), [['topic-1-1'], ['topic-1-2']]);
   const repeatHtml = await renderToString(createSSRApp(TopicReviewView, { project, record: repeatRecord, data, settings: defaultGlobalSettings }));
+  assert.match(repeatHtml, /class="topic-comment-count"[^>]*title="1 comments"/, 'The topic count includes only the current review comment.');
+  assert.match(repeatHtml, /Copy current comments/);
+  const repeatCopy = reviewCommentsText(repeatRecord.aiReview!.comments!, data, false);
+  assert.match(repeatCopy, /Check the updated caller/);
+  assert.doesNotMatch(repeatCopy, /Check callers before changing this value|Review conclusion/);
   assert.equal((repeatHtml.match(/Ming AI reviewed at/g) ?? []).length, 2);
   assert.match(repeatHtml, /years ago/);
   assert.match(repeatHtml, /Check the updated caller/);
@@ -282,13 +289,10 @@ try {
   assert.match(passingTopicsHtml, /class="is-passing topic-recommendations"/);
   assert.match(passingTopicsHtml, /class="topic-review-passed">Passed/);
   assert.doesNotMatch(passingTopicsHtml, /class="topic-comment-count"/);
-  assert.doesNotMatch(passingTopicsHtml, /Copy a prompt for your coding agent/);
-  const fixPrompt = reviewFixPrompt(commentedRecord.aiReview!.artifact.topics[0]!,
-    commentedRecord.aiReview!.recommendations!['topic-1']!, commentedRecord.aiReview!.comments!, data, false);
-  assert.match(fixPrompt, /Topic: Update main/);
-  assert.match(fixPrompt, /src\/main\.ts:1 \(new line\)/);
-  assert.match(fixPrompt, /Check callers before changing this value/);
-  assert.match(fixPrompt, /Verify all callers before merging/);
+  assert.doesNotMatch(passingTopicsHtml, /Copy current comments/);
+  const copiedComments = reviewCommentsText(commentedRecord.aiReview!.comments!, data, false);
+  assert.equal(copiedComments, '- [high] src/main.ts:1 (new line): Check callers before changing this value.\n  Suggested code: const value = 2;');
+  assert.equal(reviewCommentsText([], data, false), '');
   assert.match(commentedTopicsHtml, /Verify all callers before merging/);
   const commentedChangesHtml = await renderToString(createSSRApp(ReviewsView, {
     project, reviews: [commentedRecord], record: commentedRecord, data, reviewView: 'changes', settings: defaultGlobalSettings,
@@ -426,6 +430,22 @@ try {
   assert.match(staleHtml, /class="topic-file-type" data-type="TypeScript" style="--language-color:#3178c6;">TypeScript<\/span>/);
   assert.doesNotMatch(staleHtml, /src\/new\.ts/);
   assert.doesNotMatch(staleHtml, /Mark reviewed/);
+  const emptyData: Review = { ...data, files: [], additions: 0, deletions: 0 };
+  const emptyRecord: ReviewRecord = { ...staleRecord, data: JSON.stringify(emptyData) };
+  const emptyHtml = await renderToString(createSSRApp(TopicReviewView, {
+    project, record: emptyRecord, data: emptyData, settings: defaultGlobalSettings,
+  }));
+  assert.match(emptyHtml, /Close and delete this review if you no longer need its saved results/);
+  assert.match(emptyHtml, /class="topic-stale-notice topic-stale-empty"/);
+  assert.match(emptyHtml, /Close and delete<\/button>/);
+  const busyEmptyHtml = await renderToString(createSSRApp(TopicReviewView, {
+    project, record: emptyRecord, data: emptyData, settings: defaultGlobalSettings, reviewActionsBusy: true,
+  }));
+  assert.match(busyEmptyHtml, /class="button-outline review-delete" disabled/);
+  const demoEmptyHtml = await renderToString(createSSRApp(TopicReviewView, {
+    demo: true, project, record: emptyRecord, data: emptyData, settings: defaultGlobalSettings,
+  }));
+  assert.doesNotMatch(demoEmptyHtml, /class="button-outline review-delete"/);
   const generatingHtml = await renderToString(createSSRApp(TopicReviewView, {
     project, record: staleRecord, data: latestData, settings: defaultGlobalSettings,
     aiBusy: true, aiProgress: 'Analyzing group 2 of 3', aiCompleted: 1, aiTotal: 3,
