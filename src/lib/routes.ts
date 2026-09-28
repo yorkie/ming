@@ -20,17 +20,14 @@ export function resolveId(value: string, ids: string[]): string | null {
 
 export function routeUrl(route: Route): string {
   if (route.kind === 'home') return '/';
-  if (route.kind === 'global-settings') return `/console/${route.section ? `?section=${encodeURIComponent(route.section)}` : ''}`;
-  const params = new URLSearchParams({ id: route.projectId });
+  if (route.kind === 'global-settings') return `/console/${route.section ? encodeURIComponent(route.section) : ''}`;
+  const base = `/projects/${encodeURIComponent(route.projectId)}`;
   if (route.kind === 'project') {
-    params.set('page', route.page);
-    if (route.page === 'files' && route.path) params.set('path', route.path);
-  } else {
-    params.set('page', 'reviews');
-    params.set('review', route.reviewId);
-    params.set('tab', route.page);
+    const filePath = route.page === 'files' && route.path
+      ? `/${route.path.split('/').map(encodeURIComponent).join('/')}` : '';
+    return `${base}/${route.page}${filePath}`;
   }
-  return `/projects/?${params}`;
+  return `${base}/reviews/${encodeURIComponent(route.reviewId)}/${route.page}`;
 }
 
 export function parseRoute(url: string): Route | null {
@@ -39,24 +36,31 @@ export function parseRoute(url: string): Route | null {
   if (parsed.hash) return null;
   const pathname = parsed.pathname.replace(/\/index\.html$/, '/');
   if (pathname === '/') return { kind: 'home' };
-  if (pathname === '/console/' || pathname === '/console' || pathname === '/settings/' || pathname === '/settings') {
-    const section = parsed.searchParams.get('section');
-    if (!section) return { kind: 'global-settings' };
-    if (['usage', 'appearance', 'files', 'reviews', 'copilot', 'github'].includes(section)) return { kind: 'global-settings', section: section as GlobalSettingsSection };
+  const parts = pathname.slice(1).split('/');
+  // A trailing slash is a delimiter for pages, but part of a file path.
+  if (parts.at(-1) === '' && !(parts[0] === 'projects' && parts[2] === 'files' && parts.length > 3)) parts.pop();
+  if (parts[0] === 'console' || parts[0] === 'settings') {
+    if (parts.length === 1) return { kind: 'global-settings' };
+    if (parts.length === 2 && ['usage', 'appearance', 'files', 'reviews', 'copilot', 'github'].includes(parts[1]))
+      return { kind: 'global-settings', section: parts[1] as GlobalSettingsSection };
     return null;
   }
-  if (pathname !== '/projects/' && pathname !== '/projects') return null;
-  const projectId = parsed.searchParams.get('id');
+  if (parts[0] !== 'projects' || parts.length < 2) return null;
+  let projectId: string;
+  try { projectId = decodeURIComponent(parts[1]); } catch { return null; }
   if (!projectId) return null;
-  const page = parsed.searchParams.get('page') ?? 'files';
-  if (!['files', 'reviews', 'branches', 'settings'].includes(page)) return null;
-  const reviewId = parsed.searchParams.get('review');
-  if (reviewId) {
-    const tab = parsed.searchParams.get('tab') ?? 'topics';
-    if (page !== 'reviews' || !['topics', 'changes', 'commits'].includes(tab)) return null;
-    return { kind: 'review', projectId, reviewId, page: tab as 'topics' | 'changes' | 'commits' };
+  if (parts.length === 2) return { kind: 'project', projectId, page: 'files' };
+  const page = parts[2];
+  if (page === 'reviews' && parts.length >= 4) {
+    if (parts.length !== 5 || !['topics', 'changes', 'commits'].includes(parts[4])) return null;
+    try { return { kind: 'review', projectId, reviewId: decodeURIComponent(parts[3]), page: parts[4] as 'topics' | 'changes' | 'commits' }; }
+    catch { return null; }
   }
-  const path = parsed.searchParams.get('path');
-  if (path && page !== 'files') return null;
-  return { kind: 'project', projectId, page: page as 'files' | 'reviews' | 'branches' | 'settings', ...(path ? { path } : {}) };
+  if (page === 'files' && parts.length > 3) {
+    try { return { kind: 'project', projectId, page, path: parts.slice(3).map(decodeURIComponent).join('/') }; }
+    catch { return null; }
+  }
+  if (parts.length === 3 && ['files', 'reviews', 'branches', 'settings'].includes(page))
+    return { kind: 'project', projectId, page: page as 'files' | 'reviews' | 'branches' | 'settings' };
+  return null;
 }
